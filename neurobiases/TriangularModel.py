@@ -1,6 +1,8 @@
 import h5py
+import matplotlib.pyplot as plt
 import numpy as np
 
+from neurobiases.utils import read_attribute_dict
 from scipy.stats import truncexpon
 from sklearn.utils import check_random_state
 
@@ -77,70 +79,65 @@ class TriangularModel:
             self.stim_kwargs = stim_kwargs
             self.N = self.coupling_kwargs.get('N', 100)
             self.M = self.tuning_kwargs.get('M', 10)
+            self.coupling_kwargs['random_state'] = check_random_state(
+                coupling_kwargs.get('random_state', None)
+            )
+            self.tuning_kwargs['random_state'] = check_random_state(
+                tuning_kwargs.get('random_state', None)
+            )
             # create parameters according to preferred design
-            self.a, self.b, self.B = self.generate_tm_parameters()
+            self.a, self.b, self.B = self.generate_triangular_model()
         else:
             parameter_file = h5py.File(parameter_path, 'r')
+            # coupling parameters and kwargs
             coupling = parameter_file['coupling']
-            self.a = coupling['a'][:]
-            self.coupling_kwargs = {}
-            for key, val in coupling.attrs.items():
-                if val == '':
-                    self.coupling_kwargs[key] = None
-                else:
-                    self.coupling_props[key] = val
-            self.a = self.a.reshape(self.coupling_kwargs['N'], 1)
+            self.a = coupling['a'][:][..., np.newaxis]
+            self.coupling_kwargs = read_attribute_dict(coupling.attrs)
+            # tuning parameters and kwargs
+            tuning = parameter_file['tuning']
+            self.b = tuning['b'][:][..., np.newaxis]
+            self.B = tuning['B'][:]
+            self.tuning_kwargs = read_attribute_dict(tuning.attrs)
 
     def generate_triangular_model(self):
         """Generate model parameters in the triangular model according to a
         variety of design critera.
 
-        Parameters
-        ----------
-        design : string
-            The structure that the coupling and tuning parameters should
-            possess.
-
         Returns
         -------
-        A : nd-array, shape (N, 1).
-            Coupling parameters.
+        a : np.ndarray, shape (N, 1).
+            The coupling parameters.
 
-        B : nd-array, shape (M, N + 1).
-            Tuning parameters.
+        b : np.ndarray, shape (M, 1).
+            The target tuning parameters.
+
+        B : np.ndarray, shape (M, N)
+            The non-target tuning parameters.
         """
         # initialize parameter arrays
         a = np.zeros((self.N, 1))
         B_all = np.zeros((self.M, self.N + 1))
-
+        # calculate number of non-zero parameters using sparsity
         n_nonzero_tuning = int((1 - self.tuning_kwargs['sparsity']) * self.M)
         n_nonzero_coupling = int((1 - self.coupling_kwargs['sparsity']) * self.N)
-
-        # obtain random states
-        tuning_random_state = self.tuning_props.get('random_state', None)
-        tuning_random_state = check_random_state(tuning_random_state)
-        coupling_random_state = self.coupling_props.get('random_state', None)
-        coupling_random_state = check_random_state(coupling_random_state)
+        # get random states
+        coupling_random_state = self.coupling_kwargs['random_state']
+        tuning_random_state = self.tuning_kwargs['random_state']
 
         # randomly assign selection profiles
         if self.parameter_design == 'random':
             # draw coupling parameters
             nonzero_a = self.draw_parameters(
-                distribution=self.coupling_kwargs['distribution'],
                 size=n_nonzero_coupling,
-                random_state=coupling_random_state,
                 **self.coupling_kwargs)
             # draw all tuning parameters jointly
-            nonzero_B = self.draw_parameters(
-                distribution=self.tuning_kwargs['distribution'],
+            nonzero_B_all = self.draw_parameters(
                 size=(n_nonzero_tuning, self.N + 1),
-                random_state=tuning_random_state,
                 **self.tuning_kwargs)
 
             # store the non-zero values
             a[:n_nonzero_coupling, 0] = nonzero_a
-            B_all[:n_nonzero_tuning, :] = nonzero_B
-
+            B_all[:n_nonzero_tuning, :] = nonzero_B_all
             # shuffle the parameters in place
             coupling_random_state.shuffle(a)
             # for tuning, we'll shuffle rows separately
@@ -149,9 +146,88 @@ class TriangularModel:
             B = B_all[:, 1:]
 
         elif self.parameter_design == 'basis_functions':
-            
+            # get where each basis function is centered
+            self.bf_pref_tuning = np.linspace(0, 1, self.M)
+            self.bf_scale = self.tuning_kwargs.get('bf_scale', 0.5 / self.M)
+
+            # get preferred tunings for each neuron
+            non_target_tuning = np.linspace(0, 1, self.N)
+            target_tuning = self.tuning_kwargs.get('target_pref_tuning', 0.5)
+            all_tunings = np.append(non_target_tuning, target_tuning)
+
+            # differences between preferred tuning and bf locations
+            tuning_diffs = np.abs(np.subtract.outer(self.bf_pref_tuning, all_tunings))
+            # calculate preferred tuning, with possible scaling
+            B_all = 1 - tuning_diffs
+            # add noise to tuning parameters if desired
+            if self.tuning_kwargs.get('add_noise', True):
+                noise = tuning_random_state.normal(
+                    loc=0.,
+                    scale=self.tuning_kwargs.get('noise_scale', 0.2),
+                    size=(self.M, self.N + 1))
+                B_all += noise
+            B_all = np.abs(B_all) * self.tuning_kwargs.get('scale', 1)
+
+            # for each neuron, get selection profile
+            for idx in range(self.N + 1):
+                # get tuning differences with bfs
+                tuning_diff = tuning_diffs[:, idx]
+                # choose zero indices by chance, weighted by tuning diff
+                nonzero_indices = np.argsort(tuning_diff)[:n_nonzero_tuning]
+                # set parameters to zero
+                zero_indices = np.setdiff1d(np.arange(self.M), nonzero_indices)
+                B_all[zero_indices, idx] = 0
+            B, b = np.split(B_all, [self.N], axis=1)
+
+            # decide which neurons are coupled according to their tuning
+            # distance with the target neuron
+            p = np.maximum(np.abs(1 - (target_tuning - non_target_tuning)), 0)
+            p = p / p.sum()
+            self.coupled_indices = np.sort(np.random.choice(
+                a=np.arange(self.N),
+                size=n_nonzero_coupling,
+                replace=False,
+                p=p))
+            self.non_coupled_indices = np.setdiff1d(np.arange(self.N),
+                                                    self.coupled_indices)
+            # draw coupling parameters
+            a = np.zeros((self.N, 1))
+            a[self.coupled_indices, 0] = self.draw_parameters(
+                size=n_nonzero_coupling,
+                **self.coupling_kwargs)
 
         return a, b, B
+
+    def plot_tuning_curves(self, fax=None, linewidth=1):
+        if fax is None:
+            fig, ax = plt.subplots(1, 1, figsize=(12, 6))
+        else:
+            fig, ax = fax
+
+        if self.parameter_design == 'basis_functions':
+            stimuli = np.linspace(0, 1, 10000)
+            gaussians = np.exp(
+                -0.5 * np.subtract.outer(stimuli, self.bf_pref_tuning)**2 / self.bf_scale
+            )
+            responses = np.dot(gaussians, self.B)
+            target_responses = np.dot(gaussians, self.b)
+            # plot target responses
+            ax.plot(stimuli,
+                    target_responses,
+                    color='r',
+                    linewidth=linewidth)
+            # plot coupled responses
+            for neuron in self.coupled_indices:
+                ax.plot(stimuli,
+                        responses[:, neuron],
+                        color='black',
+                        linewidth=linewidth)
+            for neuron in self.non_coupled_indices:
+                ax.plot(stimuli,
+                        responses[:, neuron],
+                        color='gray',
+                        linewidth=linewidth)
+        return fig, ax
 
     @staticmethod
     def draw_parameters(distribution, size, random_state=None, **kwargs):
@@ -202,8 +278,8 @@ class TriangularModel:
                 high=kwargs['high'],
                 size=size)
 
-        # distribution where probability increases with magnitude
-        # symmetrized around zero
+        # distribution where probability density increases with magnitude
+        # (symmetric about zero)
         elif distribution == 'shifted_exponential':
             samples = truncexpon.rvs(
                 b=kwargs['high'],  # cutoff value
