@@ -200,6 +200,9 @@ class TriangularModel:
 
         return a, b, B
 
+    def generate_noise_structure(self):
+        self.L = np.zeros((self.n_latent, self.N))
+
     def generate_samples(self, n_samples, random_state=None):
         if random_state is None:
             random_state = self.random_state
@@ -211,10 +214,12 @@ class TriangularModel:
             X = utils.calculate_tuning_features(stimuli, self.bf_pref_tuning, self.bf_scale)
             # non-target responses
             bin_width = 0.50
-            means = np.exp(bin_width * np.dot(X, self.B))
-            Y = random_state.poisson(lam=means)
+            non_target_mus = np.exp(bin_width * np.dot(X, self.B))
+            Y = random_state.poisson(lam=non_target_mus)
 
-        return stimuli, X, Y
+            target_mus = np.exp((np.dot(X, self.b) + np.dot(Y, self.a)) * bin_width)
+            y = random_state.poisson(lam=target_mus)
+            return stimuli, X, Y, y
 
     def plot_tuning_curves(self, fax=None, linewidth=1):
         if fax is None:
