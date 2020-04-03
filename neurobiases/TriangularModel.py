@@ -1,8 +1,8 @@
 import h5py
 import matplotlib.pyplot as plt
+import neurobiases.utils as utils
 import numpy as np
 
-from neurobiases.utils import read_attribute_dict
 from scipy.stats import truncexpon
 from sklearn.utils import check_random_state
 
@@ -67,7 +67,8 @@ class TriangularModel:
     """
     def __init__(
         self, model='linear', parameter_path=None, parameter_design='basis_functions',
-        coupling_kwargs=None, tuning_kwargs=None, stim_kwargs=None
+        coupling_kwargs=None, tuning_kwargs=None, stim_kwargs=None,
+        random_state=None
     ):
         self.model = model
         self.parameter_design = parameter_design
@@ -85,6 +86,7 @@ class TriangularModel:
             self.tuning_kwargs['random_state'] = check_random_state(
                 tuning_kwargs.get('random_state', None)
             )
+            self.random_state = check_random_state(random_state)
             # create parameters according to preferred design
             self.a, self.b, self.B = self.generate_triangular_model()
         else:
@@ -92,12 +94,12 @@ class TriangularModel:
             # coupling parameters and kwargs
             coupling = parameter_file['coupling']
             self.a = coupling['a'][:][..., np.newaxis]
-            self.coupling_kwargs = read_attribute_dict(coupling.attrs)
+            self.coupling_kwargs = utils.read_attribute_dict(coupling.attrs)
             # tuning parameters and kwargs
             tuning = parameter_file['tuning']
             self.b = tuning['b'][:][..., np.newaxis]
             self.B = tuning['B'][:]
-            self.tuning_kwargs = read_attribute_dict(tuning.attrs)
+            self.tuning_kwargs = utils.read_attribute_dict(tuning.attrs)
 
     def generate_triangular_model(self):
         """Generate model parameters in the triangular model according to a
@@ -163,7 +165,7 @@ class TriangularModel:
             if self.tuning_kwargs.get('add_noise', True):
                 noise = tuning_random_state.normal(
                     loc=0.,
-                    scale=self.tuning_kwargs.get('noise_scale', 0.2),
+                    scale=self.tuning_kwargs.get('noise_scale', 0.5),
                     size=(self.M, self.N + 1))
                 B_all += noise
             B_all = np.abs(B_all) * self.tuning_kwargs.get('scale', 1)
@@ -181,9 +183,9 @@ class TriangularModel:
 
             # decide which neurons are coupled according to their tuning
             # distance with the target neuron
-            p = np.maximum(np.abs(1 - (target_tuning - non_target_tuning)), 0)
+            p = np.maximum(1 - np.abs(target_tuning - non_target_tuning), 0)
             p = p / p.sum()
-            self.coupled_indices = np.sort(np.random.choice(
+            self.coupled_indices = np.sort(coupling_random_state.choice(
                 a=np.arange(self.N),
                 size=n_nonzero_coupling,
                 replace=False,
@@ -198,6 +200,22 @@ class TriangularModel:
 
         return a, b, B
 
+    def generate_samples(self, n_samples, random_state=None):
+        if random_state is None:
+            random_state = self.random_state
+        else:
+            random_state = check_random_state(random_state)
+
+        if self.parameter_design == 'basis_functions':
+            stimuli = random_state.uniform(low=0, high=1, size=n_samples)
+            X = utils.calculate_tuning_features(stimuli, self.bf_pref_tuning, self.bf_scale)
+            # non-target responses
+            bin_width = 0.50
+            means = np.exp(bin_width * np.dot(X, self.B))
+            Y = random_state.poisson(lam=means)
+
+        return stimuli, X, Y
+
     def plot_tuning_curves(self, fax=None, linewidth=1):
         if fax is None:
             fig, ax = plt.subplots(1, 1, figsize=(12, 6))
@@ -206,25 +224,26 @@ class TriangularModel:
 
         if self.parameter_design == 'basis_functions':
             stimuli = np.linspace(0, 1, 10000)
-            gaussians = np.exp(
-                -0.5 * np.subtract.outer(stimuli, self.bf_pref_tuning)**2 / self.bf_scale
+            non_target_tuning = utils.calculate_tuning_curves(
+                B=self.B, bf_pref_tuning=self.bf_pref_tuning, bf_scale=self.bf_scale,
             )
-            responses = np.dot(gaussians, self.B)
-            target_responses = np.dot(gaussians, self.b)
+            target_tuning = utils.calculate_tuning_curves(
+                B=self.b, bf_pref_tuning=self.bf_pref_tuning, bf_scale=self.bf_scale
+            )
             # plot target responses
             ax.plot(stimuli,
-                    target_responses,
+                    target_tuning,
                     color='r',
                     linewidth=linewidth)
             # plot coupled responses
             for neuron in self.coupled_indices:
                 ax.plot(stimuli,
-                        responses[:, neuron],
+                        non_target_tuning[:, neuron],
                         color='black',
                         linewidth=linewidth)
             for neuron in self.non_coupled_indices:
                 ax.plot(stimuli,
-                        responses[:, neuron],
+                        non_target_tuning[:, neuron],
                         color='gray',
                         linewidth=linewidth)
         return fig, ax
