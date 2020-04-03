@@ -11,6 +11,10 @@ def read_attribute_dict(attributes):
     return copy
 
 
+def bf_mean(bf_center, bf_scale, limits=(0, 1)):
+    
+def basis_function_variance(bf_pref_tuning, bf_scale, limits=(0, 1)):
+
 def calculate_tuning_features(stimuli, bf_pref_tuning, bf_scale):
     """Get basis function tuning features given a set of input stimuli.
 
