@@ -67,6 +67,7 @@ class TriangularModel:
     """
     def __init__(
         self, model='linear', parameter_path=None, parameter_design='basis_functions',
+        n_latent=1, signal_to_noise=3.,
         coupling_kwargs=None, tuning_kwargs=None, stim_kwargs=None,
         random_state=None
     ):
@@ -87,8 +88,11 @@ class TriangularModel:
                 tuning_kwargs.get('random_state', None)
             )
             self.random_state = check_random_state(random_state)
+            self.n_latent = n_latent
+            self.signal_to_noise = signal_to_noise
             # create parameters according to preferred design
             self.a, self.b, self.B = self.generate_triangular_model()
+            self.generate_noise_structure()
         else:
             parameter_file = h5py.File(parameter_path, 'r')
             # coupling parameters and kwargs
@@ -161,6 +165,11 @@ class TriangularModel:
             tuning_diffs = np.abs(np.subtract.outer(self.bf_pref_tuning, all_tunings))
             # calculate preferred tuning, with possible scaling
             B_all = 1 - tuning_diffs
+            # apply a sigmoid to the coefficients to flatten
+            for idx, B in enumerate(B_all.T):
+                B_all[:, idx] = utils.sigmoid(
+                    B, phase=B.mean(), b=5./(B.max() - B.min())
+                )
             # add noise to tuning parameters if desired
             if self.tuning_kwargs.get('add_noise', True):
                 noise = tuning_random_state.normal(
@@ -201,9 +210,15 @@ class TriangularModel:
         return a, b, B
 
     def generate_noise_structure(self):
-        self.L = np.zeros((self.n_latent, self.N))
+        self.L = np.random.normal(loc=0, scale=1, size=(self.n_latent, self.N))**2
+        self.l_t = np.random.normal(loc=0, scale=1., size=(self.n_latent, 1))**2
+        stimuli = self.random_state.uniform(low=0, high=1, size=100000)
+        X = utils.calculate_tuning_features(stimuli, self.bf_pref_tuning, self.bf_scale)
+        variances = np.var(np.dot(X, self.B), axis=0)
+        self.L *= np.sqrt(variances / self.signal_to_noise) / np.sqrt(np.sum(self.L**2, axis=0))
+        self.l_t *= np.sqrt(variances.mean() / self.signal_to_noise) / np.sqrt(np.sum(self.l_t**2))
 
-    def generate_samples(self, n_samples, random_state=None):
+    def generate_samples(self, n_samples, bin_width=0.5, random_state=None):
         if random_state is None:
             random_state = self.random_state
         else:
@@ -212,13 +227,15 @@ class TriangularModel:
         if self.parameter_design == 'basis_functions':
             stimuli = random_state.uniform(low=0, high=1, size=n_samples)
             X = utils.calculate_tuning_features(stimuli, self.bf_pref_tuning, self.bf_scale)
+            Z = np.random.normal(loc=0, scale=1.0, size=(n_samples, self.n_latent))
             # non-target responses
-            bin_width = 0.50
-            non_target_mus = np.exp(bin_width * np.dot(X, self.B))
-            Y = random_state.poisson(lam=non_target_mus)
-
-            target_mus = np.exp((np.dot(X, self.b) + np.dot(Y, self.a)) * bin_width)
-            y = random_state.poisson(lam=target_mus)
+            non_target_pre_exp = np.dot(X, self.B) + np.dot(Z, self.L)
+            non_target_mu = np.exp(bin_width * non_target_pre_exp)
+            Y = random_state.poisson(lam=non_target_mu)
+            # target response
+            target_pre_exp = np.dot(X, self.b) + np.dot(Y, self.a) + np.dot(Z, self.l_t)
+            target_mu = np.exp(bin_width * target_pre_exp)
+            y = random_state.poisson(lam=target_mu)
             return stimuli, X, Y, y
 
     def plot_tuning_curves(self, fax=None, linewidth=1):
@@ -228,11 +245,10 @@ class TriangularModel:
             fig, ax = fax
 
         if self.parameter_design == 'basis_functions':
-            stimuli = np.linspace(0, 1, 10000)
-            non_target_tuning = utils.calculate_tuning_curves(
+            stimuli, non_target_tuning = utils.calculate_tuning_curves(
                 B=self.B, bf_pref_tuning=self.bf_pref_tuning, bf_scale=self.bf_scale,
             )
-            target_tuning = utils.calculate_tuning_curves(
+            _, target_tuning = utils.calculate_tuning_curves(
                 B=self.b, bf_pref_tuning=self.bf_pref_tuning, bf_scale=self.bf_scale
             )
             # plot target responses

@@ -1,5 +1,7 @@
 import numpy as np
 
+from scipy.special import erf
+
 
 def read_attribute_dict(attributes):
     copy = {}
@@ -11,9 +13,31 @@ def read_attribute_dict(attributes):
     return copy
 
 
+def sigmoid(x, phase=0, b=1):
+    return 1./(1 + np.exp(-b * (x - phase)))
+
+
 def bf_mean(bf_center, bf_scale, limits=(0, 1)):
-    
-def basis_function_variance(bf_pref_tuning, bf_scale, limits=(0, 1)):
+    a, b = limits
+    norm = np.sqrt(2 * bf_scale)
+    erf_const = 0.5 * np.sqrt(np.pi)
+    mean = erf_const * norm / (b - a) * (
+        erf((b - bf_center) / norm) - erf((a - bf_center) / norm)
+    )
+    return mean
+
+
+def bf_variance(bf_center, bf_scale, limits=(0, 1)):
+    a, b = limits
+    norm = np.sqrt(bf_scale)
+    erf_const = 0.5 * np.sqrt(np.pi)
+    sq_mean = erf_const * norm / (b - a) * (
+        erf((b - bf_center) / norm) - erf((a - bf_center) / norm)
+    )
+    mean = bf_mean(bf_center, bf_scale, limits)
+    var = sq_mean - mean**2
+    return var
+
 
 def calculate_tuning_features(stimuli, bf_pref_tuning, bf_scale):
     """Get basis function tuning features given a set of input stimuli.
@@ -89,7 +113,7 @@ def calculate_tuning_curves(
     )
     # calculate responses for each neuron
     tuning_curves = intercepts + np.dot(bf_responses, B)
-    return tuning_curves
+    return stimuli, tuning_curves
 
 
 def calculate_pref_tuning(
