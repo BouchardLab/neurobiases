@@ -68,34 +68,35 @@ def bf_variance(center, scale, limits=(0, 1)):
     mean : float
         The mean of the basis function over the provided limits.
     """
-    # constants
-    a, b = limits
-    norm = np.sqrt(scale)
-    erf_const = 0.5 * np.sqrt(np.pi)
-    # calculate expected value of squared output
-    sq_mean = erf_const * norm / (b - a) * (
-        erf((b - center) / norm) - erf((a - center) / norm)
-    )
-    # calculate mean
+    # calculate expected value of squared output and mean
+    sq_mean = bf_mean(center, scale / 2., limits)
     mean = bf_mean(center, scale, limits)
     # calculate variance
     variance = sq_mean - mean**2
     return variance
 
 
-def bf_covariance(centers, scale, limits=(0, 1)):
+def bf_pairwise_cov(centers, scale, limits=(0, 1)):
     """Calculates covariance between two Gaussian basis functions given an
     input stimulus following a uniform distribution, assuming both basis
     functions have the same scale.
 
     Parameters
     ----------
-    centers : np.ndarray
-        The
+    centers : np.ndarray, shape (2,)
+        The means of the basis functions.
 
     scale : float
         The variances of the basis functions.
 
+    limits : tuple
+        The lower and upper bound of the incoming stimulus.
+
+    Returns
+    -------
+    covariance : float
+        The covariance between the two basis functions across the stimulus
+        distribution.
     """
     # calculate means of bf
     bf_means = bf_mean(centers, scale, limits=limits)
@@ -105,6 +106,65 @@ def bf_covariance(centers, scale, limits=(0, 1)):
     # calculate covariance
     covariance = product_mean - np.prod(bf_means)
     return covariance
+
+
+def bf_cov(centers, scale, limits=(0, 1)):
+    """Calculates covariance between a set of Gaussian basis functions given an
+    input stimulus following a uniform distribution, assuming all basis
+    functions have the same scale.
+
+    Parameters
+    ----------
+    centers : np.ndarray
+        The means of the basis functions.
+
+    scale : float
+        The variances of the basis functions.
+
+    limits : tuple
+        The lower and upper bound of the incoming stimulus.
+
+    Returns
+    -------
+    covariance : float
+        The covariance matrix of the basis functions.
+    """
+    bf_means = bf_mean(centers, scale, limits=limits)
+    constant = np.exp(-1. / scale * (
+        0.25 * np.add.outer(centers**2, centers**2) - 0.5 * np.outer(centers, centers)
+    ))
+    product_mean = bf_mean(0.5 * np.add.outer(centers, centers),
+                           scale / 2.,
+                           limits=(0, 1))
+    cov = constant * product_mean - np.outer(bf_means, bf_means)
+    return cov
+
+
+def bf_sum_var(weights, centers, scale, limits=(0, 1)):
+    """Calculates variance of a linear combination of basis functions.
+
+    Parameters
+    ----------
+    weights : np.ndarray, shape (n_bf,)
+        The weights of each basis function.
+
+    centers : np.ndarray, shape (n_bf,)
+        The means of the basis functions.
+
+    scale : float
+        The variances of the basis functions.
+
+    limits : tuple
+        The lower and upper bound of the incoming stimulus.
+
+    Returns
+    -------
+    covariance : float
+        The covariance matrix of the basis functions.
+    """
+    cov = bf_cov(centers, scale, limits)
+    var = np.dot(weights, np.dot(cov, weights))
+    return var
 
 
 def calculate_tuning_features(stimuli, bf_center, bf_scale):
