@@ -17,29 +17,97 @@ def sigmoid(x, phase=0, b=1):
     return 1./(1 + np.exp(-b * (x - phase)))
 
 
-def bf_mean(bf_center, bf_scale, limits=(0, 1)):
+def bf_mean(center, scale, limits=(0, 1)):
+    """Calculates the mean of a Gaussian basis function feature where the
+    input behaves as a uniform distribution.
+
+    Parameters
+    ----------
+    center : float or np.ndarray
+        The center of the Gaussian basis function.
+
+    scale : float
+        The variance of the Gaussian basis function.
+
+    limits : tuple
+        The lower and upper bound of the incoming stimulus.
+
+    Returns
+    -------
+    mean : float
+        The mean of the basis function over the provided limits.
+    """
+    # constants
     a, b = limits
-    norm = np.sqrt(2 * bf_scale)
+    norm = np.sqrt(2 * scale)
     erf_const = 0.5 * np.sqrt(np.pi)
+    # calculate mean
     mean = erf_const * norm / (b - a) * (
-        erf((b - bf_center) / norm) - erf((a - bf_center) / norm)
+        erf((b - center) / norm) - erf((a - center) / norm)
     )
     return mean
 
 
-def bf_variance(bf_center, bf_scale, limits=(0, 1)):
+def bf_variance(center, scale, limits=(0, 1)):
+    """Calculates the variance of a Gaussian basis function feature where the
+    input behaves as a uniform distribution.
+
+    Parameters
+    ----------
+    center : float or np.ndarray
+        The center of the Gaussian basis function.
+
+    scale : float
+        The variance of the Gaussian basis function.
+
+    limits : tuple
+        The lower and upper bound of the incoming stimulus.
+
+    Returns
+    -------
+    mean : float
+        The mean of the basis function over the provided limits.
+    """
+    # constants
     a, b = limits
-    norm = np.sqrt(bf_scale)
+    norm = np.sqrt(scale)
     erf_const = 0.5 * np.sqrt(np.pi)
+    # calculate expected value of squared output
     sq_mean = erf_const * norm / (b - a) * (
-        erf((b - bf_center) / norm) - erf((a - bf_center) / norm)
+        erf((b - center) / norm) - erf((a - center) / norm)
     )
-    mean = bf_mean(bf_center, bf_scale, limits)
-    var = sq_mean - mean**2
-    return var
+    # calculate mean
+    mean = bf_mean(center, scale, limits)
+    # calculate variance
+    variance = sq_mean - mean**2
+    return variance
 
 
-def calculate_tuning_features(stimuli, bf_pref_tuning, bf_scale):
+def bf_covariance(centers, scale, limits=(0, 1)):
+    """Calculates covariance between two Gaussian basis functions given an
+    input stimulus following a uniform distribution, assuming both basis
+    functions have the same scale.
+
+    Parameters
+    ----------
+    centers : np.ndarray
+        The
+
+    scale : float
+        The variances of the basis functions.
+
+    """
+    # calculate means of bf
+    bf_means = bf_mean(centers, scale, limits=limits)
+    # calculated expected value of the product
+    constant = np.exp(-1./scale * (0.25 * np.sum(centers**2) - 0.5 * np.prod(centers)))
+    product_mean = constant * bf_mean(np.mean(centers), scale / 2)
+    # calculate covariance
+    covariance = product_mean - np.prod(bf_means)
+    return covariance
+
+
+def calculate_tuning_features(stimuli, bf_center, bf_scale):
     """Get basis function tuning features given a set of input stimuli.
 
     Parameters
@@ -59,7 +127,7 @@ def calculate_tuning_features(stimuli, bf_pref_tuning, bf_scale):
         The tuning features for each stimulus.
     """
     tuning_features = np.exp(
-        -0.5 * np.subtract.outer(stimuli, bf_pref_tuning)**2 / bf_scale
+        -0.5 * np.subtract.outer(stimuli, bf_center)**2 / bf_scale
     )
     return tuning_features
 

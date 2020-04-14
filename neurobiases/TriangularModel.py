@@ -174,7 +174,7 @@ class TriangularModel:
             if self.tuning_kwargs.get('add_noise', True):
                 noise = tuning_random_state.normal(
                     loc=0.,
-                    scale=self.tuning_kwargs.get('noise_scale', 0.5),
+                    scale=self.tuning_kwargs.get('noise_scale', 0.25),
                     size=(self.M, self.N + 1))
                 B_all += noise
             B_all = np.abs(B_all) * self.tuning_kwargs.get('scale', 1)
