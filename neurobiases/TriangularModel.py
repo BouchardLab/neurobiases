@@ -152,8 +152,8 @@ class TriangularModel:
             B = B_all[:, 1:]
 
         elif self.parameter_design == 'basis_functions':
-            # get where each basis function is centered
-            self.bf_pref_tuning = np.linspace(0, 1, self.M)
+            # get basis function centers and width
+            self.bf_centers = np.linspace(0, 1, self.M)
             self.bf_scale = self.tuning_kwargs.get('bf_scale', 0.5 / self.M)
 
             # get preferred tunings for each neuron
@@ -161,11 +161,11 @@ class TriangularModel:
             target_tuning = self.tuning_kwargs.get('target_pref_tuning', 0.5)
             all_tunings = np.append(non_target_tuning, target_tuning)
 
-            # differences between preferred tuning and bf locations
-            tuning_diffs = np.abs(np.subtract.outer(self.bf_pref_tuning, all_tunings))
+            # calculate differences between preferred tuning and bf locations
+            tuning_diffs = np.abs(np.subtract.outer(self.bf_centers, all_tunings))
             # calculate preferred tuning, with possible scaling
             B_all = 1 - tuning_diffs
-            # apply a sigmoid to the coefficients to flatten
+            # apply a sigmoid to flatten coefficients
             for idx, B in enumerate(B_all.T):
                 B_all[:, idx] = utils.sigmoid(
                     B, phase=B.mean(), b=5./(B.max() - B.min())
@@ -175,7 +175,8 @@ class TriangularModel:
                 noise = tuning_random_state.normal(
                     loc=0.,
                     scale=self.tuning_kwargs.get('noise_scale', 0.25),
-                    size=(self.M, self.N + 1))
+                    size=(self.M, self.N + 1)
+                )
                 B_all += noise
             B_all = np.abs(B_all) * self.tuning_kwargs.get('scale', 1)
 
@@ -189,6 +190,13 @@ class TriangularModel:
                 zero_indices = np.setdiff1d(np.arange(self.M), nonzero_indices)
                 B_all[zero_indices, idx] = 0
             B, b = np.split(B_all, [self.N], axis=1)
+            # save all tuning curves
+            self.B_all = B_all
+            # calculate preferred tuning for each neuron
+            self.tuning_prefs = utils.calculate_pref_tuning(
+                B=self.B_all, bf_centers=self.bf_centers, bf_scale=self.bf_scale,
+                n_stimuli=10000, limits=(0, 1)
+            )
 
             # decide which neurons are coupled according to their tuning
             # distance with the target neuron
@@ -213,7 +221,7 @@ class TriangularModel:
         self.L = np.random.normal(loc=0, scale=1, size=(self.n_latent, self.N))**2
         self.l_t = np.random.normal(loc=0, scale=1., size=(self.n_latent, 1))**2
         stimuli = self.random_state.uniform(low=0, high=1, size=100000)
-        X = utils.calculate_tuning_features(stimuli, self.bf_pref_tuning, self.bf_scale)
+        X = utils.calculate_tuning_features(stimuli, self.bf_centers, self.bf_scale)
         variances = np.var(np.dot(X, self.B), axis=0)
         self.L *= np.sqrt(variances / self.signal_to_noise) / np.sqrt(np.sum(self.L**2, axis=0))
         self.l_t *= np.sqrt(variances.mean() / self.signal_to_noise) / np.sqrt(np.sum(self.l_t**2))
@@ -226,7 +234,7 @@ class TriangularModel:
 
         if self.parameter_design == 'basis_functions':
             stimuli = random_state.uniform(low=0, high=1, size=n_samples)
-            X = utils.calculate_tuning_features(stimuli, self.bf_pref_tuning, self.bf_scale)
+            X = utils.calculate_tuning_features(stimuli, self.bf_centers, self.bf_scale)
             Z = np.random.normal(loc=0, scale=1.0, size=(n_samples, self.n_latent))
             # non-target responses
             non_target_pre_exp = np.dot(X, self.B) + np.dot(Z, self.L)
@@ -246,10 +254,10 @@ class TriangularModel:
 
         if self.parameter_design == 'basis_functions':
             stimuli, non_target_tuning = utils.calculate_tuning_curves(
-                B=self.B, bf_pref_tuning=self.bf_pref_tuning, bf_scale=self.bf_scale,
+                B=self.B, bf_centers=self.bf_centers, bf_scale=self.bf_scale,
             )
             _, target_tuning = utils.calculate_tuning_curves(
-                B=self.b, bf_pref_tuning=self.bf_pref_tuning, bf_scale=self.bf_scale
+                B=self.b, bf_centers=self.bf_centers, bf_scale=self.bf_scale
             )
             # plot target responses
             ax.plot(stimuli,

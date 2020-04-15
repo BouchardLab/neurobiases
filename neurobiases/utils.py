@@ -167,7 +167,7 @@ def bf_sum_var(weights, centers, scale, limits=(0, 1)):
     return var
 
 
-def calculate_tuning_features(stimuli, bf_center, bf_scale):
+def calculate_tuning_features(stimuli, bf_centers, bf_scale):
     """Get basis function tuning features given a set of input stimuli.
 
     Parameters
@@ -175,7 +175,7 @@ def calculate_tuning_features(stimuli, bf_center, bf_scale):
     stimuli : np.ndarray, shape (n_samples,)
         The input stimuli.
 
-    bf_pref_tuning : np.ndarray, shape (n_parameters,)
+    bf_centers : np.ndarray, shape (n_parameters,)
         The locations of each basis function.
 
     bf_scale : float
@@ -187,13 +187,13 @@ def calculate_tuning_features(stimuli, bf_center, bf_scale):
         The tuning features for each stimulus.
     """
     tuning_features = np.exp(
-        -0.5 * np.subtract.outer(stimuli, bf_center)**2 / bf_scale
+        -0.5 * np.subtract.outer(stimuli, bf_centers)**2 / bf_scale
     )
     return tuning_features
 
 
 def calculate_tuning_curves(
-    B, bf_pref_tuning, bf_scale, n_stimuli=10000, limits=(0, 1), intercepts=None
+    B, bf_centers, bf_scale, n_stimuli=10000, limits=(0, 1), intercepts=None
 ):
     """Calculates the tuning curves using Gaussian basis functions for a provided
     set of tuning parameters.
@@ -204,7 +204,7 @@ def calculate_tuning_curves(
         The tuning parameters for a set of neurons, with each column referring
         to a neuron.
 
-    bf_pref_tuning : np.ndarray, shape (n_parameters,)
+    bf_centers : np.ndarray, shape (n_parameters,)
         The locations of each basis function.
 
     bf_scale : float
@@ -237,7 +237,7 @@ def calculate_tuning_curves(
     stimuli = np.linspace(limits[0], limits[1], n_stimuli)
     # get responses for each basis function
     bf_responses = np.exp(
-        -0.5 * np.subtract.outer(stimuli, bf_pref_tuning)**2 / bf_scale
+        -0.5 * np.subtract.outer(stimuli, bf_centers)**2 / bf_scale
     )
     # calculate responses for each neuron
     tuning_curves = intercepts + np.dot(bf_responses, B)
@@ -245,7 +245,7 @@ def calculate_tuning_curves(
 
 
 def calculate_pref_tuning(
-    B, bf_pref_tuning, bf_scale, n_stimuli=10000, limits=(0, 1)
+    B, bf_centers, bf_scale, n_stimuli=10000, limits=(0, 1)
 ):
     """Calculate the preferred tuning using tuning parameters.
 
@@ -255,7 +255,7 @@ def calculate_pref_tuning(
         The tuning parameters for a set of neurons, with each column referring
         to a neuron.
 
-    bf_pref_tuning : np.ndarray, shape (n_parameters,)
+    bf_centers : np.ndarray, shape (n_parameters,)
         The locations of each basis function.
 
     bf_scale : float
@@ -278,9 +278,9 @@ def calculate_pref_tuning(
     """
     stimuli = np.linspace(limits[0], limits[1], n_stimuli)
     # calculate tuning curves
-    tuning_curves = calculate_tuning_curves(
+    _, tuning_curves = calculate_tuning_curves(
         B=B,
-        bf_pref_tuning=bf_pref_tuning,
+        bf_centers=bf_centers,
         bf_scale=bf_scale,
         n_stimuli=n_stimuli,
         limits=limits)
