@@ -98,12 +98,12 @@ class TriangularModel:
             # coupling parameters and kwargs
             coupling = parameter_file['coupling']
             self.a = coupling['a'][:][..., np.newaxis]
-            self.coupling_kwargs = utils.read_attribute_dict(coupling.attrs)
+            self.coupling_kwargs = utils.copy_attribute_dict(coupling.attrs)
             # tuning parameters and kwargs
             tuning = parameter_file['tuning']
             self.b = tuning['b'][:][..., np.newaxis]
             self.B = tuning['B'][:]
-            self.tuning_kwargs = utils.read_attribute_dict(tuning.attrs)
+            self.tuning_kwargs = utils.copy_attribute_dict(tuning.attrs)
 
     def generate_triangular_model(self):
         """Generate model parameters in the triangular model according to a
@@ -218,13 +218,13 @@ class TriangularModel:
         return a, b, B
 
     def generate_noise_structure(self):
-        self.L = np.random.normal(loc=0, scale=1, size=(self.n_latent, self.N))**2
-        self.l_t = np.random.normal(loc=0, scale=1., size=(self.n_latent, 1))**2
-        stimuli = self.random_state.uniform(low=0, high=1, size=100000)
-        X = utils.calculate_tuning_features(stimuli, self.bf_centers, self.bf_scale)
-        variances = np.var(np.dot(X, self.B), axis=0)
-        self.L *= np.sqrt(variances / self.signal_to_noise) / np.sqrt(np.sum(self.L**2, axis=0))
-        self.l_t *= np.sqrt(variances.mean() / self.signal_to_noise) / np.sqrt(np.sum(self.l_t**2))
+        # calculate variance of linear inputs
+        tuning_variance = np.array([utils.bf_sum_var(
+            weights=self.B[:, neuron],
+            centers=self.bf_centers,
+            scale=self.bf_scale,
+            limits=(0, 1)) for neuron in range(self.N)])
+        self.Psi = tuning_variance
 
     def generate_samples(self, n_samples, bin_width=0.5, random_state=None):
         if random_state is None:
@@ -235,16 +235,64 @@ class TriangularModel:
         if self.parameter_design == 'basis_functions':
             stimuli = random_state.uniform(low=0, high=1, size=n_samples)
             X = utils.calculate_tuning_features(stimuli, self.bf_centers, self.bf_scale)
-            Z = np.random.normal(loc=0, scale=1.0, size=(n_samples, self.n_latent))
-            # non-target responses
-            non_target_pre_exp = np.dot(X, self.B) + np.dot(Z, self.L)
-            non_target_mu = np.exp(bin_width * non_target_pre_exp)
-            Y = random_state.poisson(lam=non_target_mu)
-            # target response
-            target_pre_exp = np.dot(X, self.b) + np.dot(Y, self.a) + np.dot(Z, self.l_t)
-            target_mu = np.exp(bin_width * target_pre_exp)
-            y = random_state.poisson(lam=target_mu)
+            Z = random_state.normal(loc=0, scale=1.0, size=(n_samples, self.n_latent))
+
+            if self.model == 'linear':
+                # non-target private variability
+                psi_nt = np.sqrt(self.Psi_nt) * random_state.normal(loc=0,
+                                                                    scale=1.0,
+                                                                    size=(n_samples, self.N))
+                # non-target neural activity
+                Y = np.dot(X, self.B) + np.dot(Z, self.L) + psi_nt
+                # target private variability
+                psi_t = np.sqrt(self.Psi_t) * random_state.normal(loc=0,
+                                                                  scale=1.0,
+                                                                  size=n_samples)
+                # target neural activity
+                y = np.dot(X, self.b) + np.dot(Y, self.a) + np.dot(Z, self.l) + psi_t
+            elif self.model == 'poisson':
+                # non-target responses
+                non_target_pre_exp = np.dot(X, self.B) + np.dot(Z, self.L)
+                non_target_mu = np.exp(bin_width * non_target_pre_exp)
+                Y = random_state.poisson(lam=non_target_mu)
+                # target response
+                target_pre_exp = np.dot(X, self.b) + np.dot(Y, self.a) + np.dot(Z, self.l_t)
+                target_mu = np.exp(bin_width * target_pre_exp)
+                y = random_state.poisson(lam=target_mu)
             return stimuli, X, Y, y
+
+    def identifiability_transform(self, delta):
+        # make sure delta has the correct number of dimensions
+        if delta.ndim == 1:
+            delta = delta[..., np.newaxis]
+
+        # grab latent factors
+        l_t = self._L[0, :self.K][..., np.newaxis]
+        L_nt = self._L[1:, :self.K].T
+        # grab private variances
+        Psi_t = self._Psi[0, 0]
+        Psi_nt = self._Psi[1:, 1:]
+
+        # perturbation for coupling terms
+        Delta = -np.linalg.solve(Psi_nt + np.dot(L_nt.T, L_nt),
+                                 np.dot(L_nt.T, delta))
+
+        # create augmented variables
+        delta_aug = delta + np.dot(L_nt, Delta)
+        L_aug = l_t + np.dot(L_nt, self.A)
+
+        # correction for target private variance
+        Psi_t_correction = \
+            - 2 * np.dot(Delta.T, np.dot(Psi_nt, self.A)).ravel() \
+            - np.dot(Delta.T, np.dot(Psi_nt, Delta)).ravel() \
+            - np.dot(delta_aug.T, delta_aug) \
+            - 2 * np.dot(L_aug.T, delta_aug)
+
+        # apply corrections
+        self._Psi[0, 0] = Psi_t + Psi_t_correction
+        self._L[0, :self.K] = self._L[0, :self.K] + delta.ravel()
+        self.A = self.A + Delta
+        self.Bi = self.Bi - np.dot(self.Bj, Delta)
 
     def plot_tuning_curves(self, fax=None, linewidth=1):
         if fax is None:

@@ -3,9 +3,22 @@ import numpy as np
 from scipy.special import erf
 
 
-def read_attribute_dict(attributes):
+def copy_attribute_dict(attributes):
+    """Reads in and copies an attribute dictionary from an H5 file.
+
+    Parameters
+    ----------
+    attributes : dict
+        The attribute dictionary.
+
+    Returns
+    -------
+    copy : dict
+        A copy of attributes, with empty values replaced with None.
+    """
     copy = {}
     for key, val in attributes.items():
+        # replace empty values with None
         if val == '':
             copy[key] = None
         else:
@@ -14,6 +27,23 @@ def read_attribute_dict(attributes):
 
 
 def sigmoid(x, phase=0, b=1):
+    """Calculates the sigmoid of input data.
+
+    Parameters
+    ----------
+    x : np.ndarray
+        Input data.
+
+    phase : float
+        The center of the sigmoid.
+
+    b : float
+        The growth rate. Larger values implies a steeper sigmoid function.
+
+    Returns
+    -------
+    sigmoid : np.ndarray
+    """
     return 1./(1 + np.exp(-b * (x - phase)))
 
 
@@ -159,8 +189,8 @@ def bf_sum_var(weights, centers, scale, limits=(0, 1)):
 
     Returns
     -------
-    covariance : float
-        The covariance matrix of the basis functions.
+    var : float
+        The variance of the sum.
     """
     cov = bf_cov(centers, scale, limits)
     var = np.dot(weights, np.dot(cov, weights))
@@ -287,3 +317,15 @@ def calculate_pref_tuning(
     # get tuning preference for each neuron by looking at tuning curve max
     tuning_prefs = stimuli[np.argmax(tuning_curves, axis=0)]
     return tuning_prefs
+
+
+def noise_correlation_matrix(
+    tuning_prefs, corr_upper, L=1, corr_lower=0, circular_stim=None
+):
+    diffs = np.abs(np.subtract.outer(tuning_prefs, tuning_prefs))
+    if circular_stim is not None:
+        thres = circular_stim / 2
+        diffs[diffs > thres] = circular_stim - diffs[diffs > thres]
+
+    corrs = corr_lower + corr_upper * np.exp(-diffs / L)
+    return corrs
