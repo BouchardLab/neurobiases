@@ -1,5 +1,4 @@
 import h5py
-import matplotlib.pyplot as plt
 import neurobiases.utils as utils
 import numpy as np
 
@@ -67,9 +66,8 @@ class TriangularModel:
     """
     def __init__(
         self, model='linear', parameter_path=None, parameter_design='basis_functions',
-        n_latent=1, signal_to_noise=3.,
         coupling_kwargs=None, tuning_kwargs=None, stim_kwargs=None,
-        random_state=None
+        noise_kwargs=None, random_state=None
     ):
         self.model = model
         self.parameter_design = parameter_design
@@ -79,17 +77,20 @@ class TriangularModel:
             self.coupling_kwargs = coupling_kwargs
             self.tuning_kwargs = tuning_kwargs
             self.stim_kwargs = stim_kwargs
+            self.noise_kwargs = noise_kwargs
             self.N = self.coupling_kwargs.get('N', 100)
             self.M = self.tuning_kwargs.get('M', 10)
+            self.K = self.noise_kwargs.get('K', 2)
             self.coupling_kwargs['random_state'] = check_random_state(
                 coupling_kwargs.get('random_state', None)
             )
             self.tuning_kwargs['random_state'] = check_random_state(
                 tuning_kwargs.get('random_state', None)
             )
+            self.noise_kwargs['random_state'] = check_random_state(
+                noise_kwargs.get('random_state', None)
+            )
             self.random_state = check_random_state(random_state)
-            self.n_latent = n_latent
-            self.signal_to_noise = signal_to_noise
             # create parameters according to preferred design
             self.a, self.b, self.B = self.generate_triangular_model()
             self.generate_noise_structure()
@@ -218,24 +219,70 @@ class TriangularModel:
         return a, b, B
 
     def generate_noise_structure(self):
+        """Generates the noise covariance structure for the triangular model."""
+        # get noise correlation structure based off tuning preferences
+        noise_corr = utils.noise_correlation_matrix(
+            tuning_prefs=self.tuning_prefs[:-1],
+            corr_max=self.noise_kwargs.get('corr_max', 0.2),
+            corr_min=self.noise_kwargs.get('corr_min', -0.05),
+            L=self.noise_kwargs.get('L', 1.),
+            circular_stim=None)
         # calculate variance of linear inputs
         tuning_variance = np.array([utils.bf_sum_var(
             weights=self.B[:, neuron],
             centers=self.bf_centers,
             scale=self.bf_scale,
             limits=(0, 1)) for neuron in range(self.N)])
-        self.Psi = tuning_variance
+        # noise variances are scaled by signal-to-noise ratio
+        noise_variance = tuning_variance / self.noise_kwargs['snr']
+        # get noise covariance matrix
+        noise_cov = utils.corr2cov(noise_corr, noise_variance)
+        lamb, W = np.linalg.eigh(noise_cov)
+        # break down eigenvectors into shared and private components
+        self.L_nt = np.diag(np.sqrt(lamb[-self.K:])) @ W[:, -self.K:].T
+        self.Psi_nt = np.diag(noise_cov) - np.diag(self.L_nt.T @ self.L_nt)
+        return noise_corr, noise_cov
 
     def generate_samples(self, n_samples, bin_width=0.5, random_state=None):
+        """Generate samples from the triangular model.
+
+        Parameters
+        ----------
+        n_samples : int
+            The number of samples.
+
+        bin_width : float
+            Sets the bin width for the Poisson model.
+
+        random_state : RandomState or None
+            The RandomState instance to draw samples with. If None, the
+            RandomState instance of the class is used.
+
+        Returns
+        -------
+        stimuli : np.ndarray, shape (n_samples,)
+            The stimuli that generated the samples.
+
+        X : np.ndarray, shape (n_samples, M)
+            The tuning features for each stimulus.
+
+        Y : np.ndarray, shape (n_samples, N)
+            The non-target neural activity matrix.
+
+        y : np.ndarray, shape (n_samples, 1)
+            The target neural activity responses.
+        """
         if random_state is None:
             random_state = self.random_state
         else:
             random_state = check_random_state(random_state)
 
         if self.parameter_design == 'basis_functions':
+            # draw stimulus and tuning features
             stimuli = random_state.uniform(low=0, high=1, size=n_samples)
             X = utils.calculate_tuning_features(stimuli, self.bf_centers, self.bf_scale)
-            Z = random_state.normal(loc=0, scale=1.0, size=(n_samples, self.n_latent))
+            # draw latent activity
+            Z = random_state.normal(loc=0, scale=1.0, size=(n_samples, self.K))
 
             if self.model == 'linear':
                 # non-target private variability
@@ -243,13 +290,13 @@ class TriangularModel:
                                                                     scale=1.0,
                                                                     size=(n_samples, self.N))
                 # non-target neural activity
-                Y = np.dot(X, self.B) + np.dot(Z, self.L) + psi_nt
+                Y = np.dot(X, self.B) + np.dot(Z, self.L_nt) + psi_nt
                 # target private variability
-                psi_t = np.sqrt(self.Psi_t) * random_state.normal(loc=0,
-                                                                  scale=1.0,
-                                                                  size=n_samples)
+                # psi_t = np.sqrt(self.Psi_t) * random_state.normal(loc=0,
+                #                                                  scale=1.0,
+                #                                                  size=n_samples)
                 # target neural activity
-                y = np.dot(X, self.b) + np.dot(Y, self.a) + np.dot(Z, self.l) + psi_t
+                y = np.dot(X, self.b) + np.dot(Y, self.a)  # + np.dot(Z, self.l) + psi_t
             elif self.model == 'poisson':
                 # non-target responses
                 non_target_pre_exp = np.dot(X, self.B) + np.dot(Z, self.L)
@@ -294,34 +341,61 @@ class TriangularModel:
         self.A = self.A + Delta
         self.Bi = self.Bi - np.dot(self.Bj, Delta)
 
-    def plot_tuning_curves(self, fax=None, linewidth=1):
-        if fax is None:
-            fig, ax = plt.subplots(1, 1, figsize=(12, 6))
+    def plot_tuning_curves(self, neuron='all', fax=None, linewidth=1):
+        """Plots the tuning curve(s) of the neurons in the triangular model.
+
+        Parameters
+        ----------
+        neuron : string or array-like, default 'all'
+            The neurons to plot. If 'all', all neurons plotted. If 'non-target',
+            only non-target tuning curves are plotted. If 'target', only target
+            tuning curves are plotted. If array-like, contains the neurons
+            to plot directly.
+
+        fax : tuple of mpl.figure and mpl.axes, or None
+            The figure and axes. If None, a new set will be created.
+
+        linewidth : float
+            The widths of the plotted tuning curves.
+
+        Returns
+        -------
+        fax : tuple of mpl.figure and mpl.axes
+            The figure and axes, with tuning curves plotted.
+        """
+        fig, ax = utils.check_fax(fax, figsize=(12, 6))
+
+        # figure out which neurons need to be plotted
+        if neuron == 'all':
+            to_plot = np.arange(self.N + 1)
+        elif neuron == 'target':
+            to_plot = np.array([self.N])
+        elif neuron == 'non-target':
+            to_plot = np.arange(self.N)
+        elif isinstance(neuron, (list, tuple, np.ndarray)):
+            to_plot = neuron
         else:
-            fig, ax = fax
+            raise ValueError('Value type for neuron not supported.')
 
         if self.parameter_design == 'basis_functions':
-            stimuli, non_target_tuning = utils.calculate_tuning_curves(
-                B=self.B, bf_centers=self.bf_centers, bf_scale=self.bf_scale,
-            )
-            _, target_tuning = utils.calculate_tuning_curves(
-                B=self.b, bf_centers=self.bf_centers, bf_scale=self.bf_scale
-            )
-            # plot target responses
-            ax.plot(stimuli,
-                    target_tuning,
-                    color='r',
-                    linewidth=linewidth)
-            # plot coupled responses
-            for neuron in self.coupled_indices:
+            # get tuning curves for all neurons
+            stimuli, tuning_curves = utils.calculate_tuning_curves(
+                B=self.B_all,
+                bf_centers=self.bf_centers,
+                bf_scale=self.bf_scale)
+            # iterate over tuning curves to plot
+            for idx in to_plot:
+                # color of tuning curve depends on target, coupled, or non-coupled
+                if idx in self.coupled_indices:
+                    color = 'black'
+                elif idx in self.non_coupled_indices:
+                    color = 'gray'
+                elif idx == self.N:
+                    color = 'red'
+                # plot tuning curve
                 ax.plot(stimuli,
-                        non_target_tuning[:, neuron],
-                        color='black',
-                        linewidth=linewidth)
-            for neuron in self.non_coupled_indices:
-                ax.plot(stimuli,
-                        non_target_tuning[:, neuron],
-                        color='gray',
+                        tuning_curves[:, idx],
+                        color=color,
                         linewidth=linewidth)
         return fig, ax
 

@@ -1,6 +1,34 @@
+import matplotlib.pyplot as plt
 import numpy as np
 
 from scipy.special import erf
+
+
+def check_fax(fax=None, figsize=None):
+    """Checks an incoming set of axes, and creates new ones if needed.
+
+    Parameters
+    ----------
+    fax : tuple of mpl.figure and mpl.axes, or None
+        The figure and axes. If None, a new set will be created.
+
+    figsize : tuple or None
+        The figure size, if fax is None.
+
+    Returns
+    -------
+    fig, ax : mpl.figure and mpl.axes
+        The matplotlib axes objects.
+    """
+    # no axes provided
+    if fax is None:
+        # no figure size provided: use default
+        if figsize is None:
+            figsize = (10, 10)
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+    else:
+        fig, ax = fax
+    return fig, ax
 
 
 def copy_attribute_dict(attributes):
@@ -320,12 +348,74 @@ def calculate_pref_tuning(
 
 
 def noise_correlation_matrix(
-    tuning_prefs, corr_upper, L=1, corr_lower=0, circular_stim=None
+    tuning_prefs, corr_max, corr_min=0, L=1, circular_stim=None
 ):
+    """Create noise correlation matrix according to tuning preference.
+    Correlations fall off with exponential decay.
+
+    Parameters
+    ----------
+    tuning_prefs : np.ndarray, shape (n_neurons,)
+        The tuning preferences for each neuron.
+
+    corr_max : float
+        The maximum possible noise correlation.
+
+    corr_min : float
+        The minimum possible noise correlation.
+
+    L : float
+        The exponential decay constant. Lower values imply that correlations
+        fall off more steeply.
+
+    circular_stim : None or float
+        If None, stimulus is treated normally. Otherwise, stimulus is treated
+        circularly, with this value taking on the maximum value of the stimulus.
+
+    Returns
+    -------
+    corrs : np.ndarray, shape (n_neurons, n_neurons)
+        The correlation matrix.
+    """
+    # calculate tuning differences
     diffs = np.abs(np.subtract.outer(tuning_prefs, tuning_prefs))
+    # if stimulus is circular, modify differences
     if circular_stim is not None:
         thres = circular_stim / 2
         diffs[diffs > thres] = circular_stim - diffs[diffs > thres]
-
-    corrs = corr_lower + corr_upper * np.exp(-diffs / L)
+    # calculate correlation values
+    corrs = corr_min + corr_max * np.exp(-diffs / L)
+    # replace diagonal with ones
+    np.fill_diagonal(corrs, 1)
     return corrs
+
+
+def cov2corr(cov):
+    """Convert a covariance matrix to a correlation matrix."""
+    stdevs = np.sqrt(np.diag(cov))
+    outer = np.outer(stdevs, stdevs)
+    corr = cov / outer
+    return corr
+
+
+def corr2cov(corr, var):
+    """Converts a correlation matrix to a covariance matrix, given a set of
+    variances.
+
+    Parameters
+    ----------
+    corr : np.ndarray, shape (n_units, n_units)
+        The correlation matrix.
+
+    var : np.ndarray, shape (n_units,)
+        A vector of variances for the units in the correlation matrix.
+
+    Returns
+    -------
+    cov : np.ndarray, shape (n_units, n_units)
+        The covariance matrix.
+    """
+    stdevs = np.sqrt(var)
+    outer = np.outer(stdevs, stdevs)
+    cov = corr * outer
+    return cov
