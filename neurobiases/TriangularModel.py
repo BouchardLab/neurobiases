@@ -220,30 +220,46 @@ class TriangularModel:
 
     def generate_noise_structure(self):
         """Generates the noise covariance structure for the triangular model."""
+        # first get signal-to-noise ratio
+        snr = self.noise_kwargs.get('snr', 3)
         # get noise correlation structure based off tuning preferences
         noise_corr = utils.noise_correlation_matrix(
-            tuning_prefs=self.tuning_prefs[:-1],
+            tuning_prefs=self.tuning_prefs,
             corr_max=self.noise_kwargs.get('corr_max', 0.2),
             corr_min=self.noise_kwargs.get('corr_min', -0.05),
             L=self.noise_kwargs.get('L', 1.),
             circular_stim=None)
-        # calculate variance of linear inputs
-        tuning_variance = np.array([utils.bf_sum_var(
-            weights=self.B[:, neuron],
-            centers=self.bf_centers,
-            scale=self.bf_scale,
-            limits=(0, 1)) for neuron in range(self.N)])
-        # noise variances are scaled by signal-to-noise ratio
-        noise_variance = tuning_variance / self.noise_kwargs['snr']
-        # get noise covariance matrix
-        noise_cov = utils.corr2cov(noise_corr, noise_variance)
-        lamb, W = np.linalg.eigh(noise_cov)
-        # break down eigenvectors into shared and private components
-        self.L_nt = np.diag(np.sqrt(lamb[-self.K:])) @ W[:, -self.K:].T
-        self.Psi_nt = np.diag(noise_cov) - np.diag(self.L_nt.T @ self.L_nt)
-        return noise_corr, noise_cov
+        # separate non-target portion
+        non_target_noise_corr = noise_corr[:-1, :-1]
 
-    def generate_samples(self, n_samples, bin_width=0.5, random_state=None):
+        # calculate latent factors and private variances for non-target neurons
+        non_target_signal_variance = self.non_target_signal_variance()
+        non_target_noise_variance = non_target_signal_variance / snr
+        non_target_noise_cov = utils.corr2cov(non_target_noise_corr,
+                                              non_target_noise_variance)
+        if np.allclose(non_target_noise_cov, np.diag(np.diag(non_target_noise_cov))):
+            self.L_nt = np.zeros((self.K, self.N))
+        else:
+            lamb, W = np.linalg.eigh(non_target_noise_cov)
+            self.L_nt = np.diag(np.sqrt(lamb[-self.K:])) @ W[:, -self.K:].T
+        self.Psi_nt = np.diag(non_target_noise_cov) - np.diag(self.L_nt.T @ self.L_nt)
+
+        # calculate latent factors and private variance for target neuron
+        target_signal_variance = self.target_signal_variance()
+        target_noise_variance = target_signal_variance / snr
+        noise_cov = utils.corr2cov(noise_corr, target_noise_variance)
+        lamb, W = np.linalg.eigh(noise_cov)
+        L = np.diag(np.sqrt(lamb[-self.K:])) @ W[:, -self.K:].T
+        self.l_t = L[:, -1][..., np.newaxis]
+        self.Psi_t = noise_cov[-1, -1] - (self.l_t.T @ self.l_t).item()
+
+        # combine latent factors and private variances
+        self.L = np.concatenate((self.L_nt, self.l_t), axis=1)
+        self.Psi = np.append(self.Psi_nt, self.Psi_t)
+
+    def generate_samples(
+        self, n_samples, bin_width=0.5, random_state=None, return_noise=False
+    ):
         """Generate samples from the triangular model.
 
         Parameters
@@ -286,17 +302,20 @@ class TriangularModel:
 
             if self.model == 'linear':
                 # non-target private variability
-                psi_nt = np.sqrt(self.Psi_nt) * random_state.normal(loc=0,
-                                                                    scale=1.0,
-                                                                    size=(n_samples, self.N))
+                psi_nt = np.sqrt(self.Psi_nt) * random_state.normal(
+                    loc=0,
+                    scale=1.0,
+                    size=(n_samples, self.N))
                 # non-target neural activity
                 Y = np.dot(X, self.B) + np.dot(Z, self.L_nt) + psi_nt
                 # target private variability
-                # psi_t = np.sqrt(self.Psi_t) * random_state.normal(loc=0,
-                #                                                  scale=1.0,
-                #                                                  size=n_samples)
+                psi_t = np.sqrt(self.Psi_t) * random_state.normal(
+                    loc=0,
+                    scale=1.0,
+                    size=(n_samples, 1))
                 # target neural activity
-                y = np.dot(X, self.b) + np.dot(Y, self.a)  # + np.dot(Z, self.l) + psi_t
+                y = np.dot(X, self.b) + np.dot(Y, self.a) + np.dot(Z, self.l_t) + psi_t
+
             elif self.model == 'poisson':
                 # non-target responses
                 non_target_pre_exp = np.dot(X, self.B) + np.dot(Z, self.L)
@@ -306,9 +325,21 @@ class TriangularModel:
                 target_pre_exp = np.dot(X, self.b) + np.dot(Y, self.a) + np.dot(Z, self.l_t)
                 target_mu = np.exp(bin_width * target_pre_exp)
                 y = random_state.poisson(lam=target_mu)
-            return stimuli, X, Y, y
+
+            if return_noise:
+                return stimuli, X, Y, y, Z
+            else:
+                return stimuli, X, Y, y
 
     def identifiability_transform(self, delta):
+        """Performs an identifiability transform on the parameters in the
+        model.
+
+        Parameters
+        ----------
+        delta : np.ndarray, shape (K,) or (K, 1)
+            The identifiability transform.
+        """
         # make sure delta has the correct number of dimensions
         if delta.ndim == 1:
             delta = delta[..., np.newaxis]
@@ -340,6 +371,91 @@ class TriangularModel:
         self._L[0, :self.K] = self._L[0, :self.K] + delta.ravel()
         self.A = self.A + Delta
         self.Bi = self.Bi - np.dot(self.Bj, Delta)
+
+    def non_target_signal_variance(self, limits=(0, 1)):
+        """Calculates the variance of the non-target signal, i.e., variance
+        coming directly from the tuning.
+
+        Parameters
+        ----------
+        limits : tuple
+            The limits of stimulus.
+
+        Returns
+        -------
+        variance : np.ndarray, shape (N,)
+            The variance of the signal in each non-target neuron.
+        """
+        variance = np.array([utils.bf_sum_var(
+            weights=self.B[:, neuron],
+            centers=self.bf_centers,
+            scale=self.bf_scale,
+            limits=limits) for neuron in range(self.N)])
+        return variance
+
+    def non_target_variance(self, limits=(0, 1)):
+        """Calculates the variance of the non-target neurons.
+
+        Parameters
+        ----------
+        limits : tuple
+            The limits of stimulus.
+
+        Returns
+        -------
+        variance : np.ndarray, shape (N,)
+            The variance of the non-target neural activity.
+        """
+        signal_variance = self.non_target_signal_variance(limits=limits)
+        latent_variance = np.sum(self.L_nt**2, axis=0)
+        private_variance = self.Psi_nt
+        variance = signal_variance + latent_variance + private_variance
+        return variance
+
+    def target_signal_variance(self, limits=(0, 1)):
+        """Calculates the variance of the target signal, i.e., variance
+        coming directly from the tuning and coupling.
+
+        Parameters
+        ----------
+        limits : tuple
+            The limits of stimulus.
+
+        Returns
+        -------
+        variance : float
+            The variance of the signal in the target neuron.
+        """
+        tuning_weights = self.b + self.B @ self.a
+        tuning_variance = utils.bf_sum_var(
+            weights=tuning_weights.ravel(),
+            centers=self.bf_centers,
+            scale=self.bf_scale,
+            limits=limits)
+        latent_variance = np.sum((self.L_nt @ self.a)**2)
+        private_variance = self.a.ravel()**2 @ self.Psi_nt
+        variance = tuning_variance + latent_variance + private_variance
+        return variance
+
+    def target_variance(self, limits=(0, 1)):
+        """Calculates the variance of the target signal, i.e., variance
+        coming directly from the tuning.
+
+        Parameters
+        ----------
+        limits : tuple
+            The limits of stimulus.
+
+        Returns
+        -------
+        variance : np.ndarray, shape (N,)
+            The variance of the target neuron.
+        """
+        signal_variance = self.target_signal_variance(limits=limits)
+        latent_variance = np.sum(self.l_t**2, axis=0)
+        private_variance = self.Psi_t
+        variance = signal_variance + latent_variance + private_variance
+        return variance
 
     def plot_tuning_curves(self, neuron='all', fax=None, linewidth=1):
         """Plots the tuning curve(s) of the neurons in the triangular model.
