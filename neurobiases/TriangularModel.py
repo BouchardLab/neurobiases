@@ -93,6 +93,7 @@ class TriangularModel:
             self.random_state = check_random_state(random_state)
             # create parameters according to preferred design
             self.a, self.b, self.B = self.generate_triangular_model()
+            self.B_all = np.concatenate((self.B, self.b), axis=1)
             self.generate_noise_structure()
         else:
             parameter_file = h5py.File(parameter_path, 'r')
@@ -104,6 +105,7 @@ class TriangularModel:
             tuning = parameter_file['tuning']
             self.b = tuning['b'][:][..., np.newaxis]
             self.B = tuning['B'][:]
+            self.B_all = np.concatenate((self.B, self.b), axis=1)
             self.tuning_kwargs = utils.copy_attribute_dict(tuning.attrs)
 
     def generate_triangular_model(self):
@@ -152,6 +154,65 @@ class TriangularModel:
             b = B_all[:, 0]
             B = B_all[:, 1:]
 
+        elif self.parameter_design == 'piecewise':
+            b = np.zeros((self.M, 1))
+            B = np.zeros((self.M, self.N))
+
+            # draw the non-zero parameters for the target neuron
+            nonzero_b = self.draw_parameters(
+                size=n_nonzero_tuning,
+                **self.tuning_kwargs)
+            # the offset of the target tuning curve
+            b_offset_idx = int(0.5 * (self.M - n_nonzero_tuning))
+            # set the non-zero parameters within the tuning window
+            b[b_offset_idx:b_offset_idx + n_nonzero_tuning, 0] = nonzero_b
+
+            # offsets for the non-target neuron
+            bound_frac = self.tuning_kwargs.get('bound_frac', 0.25)
+            lower_bound = -int(bound_frac * n_nonzero_tuning)
+            upper_bound = self.M - int((1 - bound_frac) * n_nonzero_tuning)
+            offsets = np.linspace(lower_bound, upper_bound, self.N).astype('int')
+
+            # iterate over neurons/offsets, assigning tuning curves
+            for neuron_idx, offset in enumerate(offsets):
+                tuning_curve = self.draw_parameters(
+                    size=n_nonzero_tuning,
+                    **self.tuning_kwargs)
+
+                # tuning curve ends up on the left side of the tuning plane
+                if offset < 0:
+                    new_offset = n_nonzero_tuning + offset
+                    B[:new_offset, neuron_idx] = tuning_curve[-new_offset:]
+                # tuning curve ends up on the right side of the tuning plane
+                elif offset >= self.M - n_nonzero_tuning + 1:
+                    B[offset:, neuron_idx] = tuning_curve[:(self.M - offset)]
+                # tuning curve is in the middle of the plane
+                else:
+                    B[offset:offset + n_nonzero_tuning, neuron_idx] = tuning_curve
+
+            B_all = np.concatenate((B, b), axis=1)
+            # calculate tuning preferences
+            self.tuning_prefs = np.argmax(B_all, axis=0)
+            # determine probabilities for neurons being coupled
+            target_tuning = self.tuning_prefs[-1]
+            non_target_tuning = self.tuning_prefs[:-1]
+            tuning_diff_decay = self.tuning_kwargs.get('tuning_diff_decay', 1)
+            probs = np.exp(-np.abs(non_target_tuning - target_tuning) / tuning_diff_decay)
+            probs /= probs.sum()
+            # determine coupled and non-coupled indices randomly
+            self.coupled_indices = np.sort(coupling_random_state.choice(
+                a=np.arange(self.N),
+                size=n_nonzero_coupling,
+                replace=False,
+                p=probs))
+            self.non_coupled_indices = np.setdiff1d(np.arange(self.N),
+                                                    self.coupled_indices)
+            # draw coupling parameters
+            a = np.zeros((self.N, 1))
+            a[self.coupled_indices, 0] = self.draw_parameters(
+                size=n_nonzero_coupling,
+                **self.coupling_kwargs)
+
         elif self.parameter_design == 'basis_functions':
             # get basis function centers and width
             self.bf_centers = np.linspace(0, 1, self.M)
@@ -191,11 +252,9 @@ class TriangularModel:
                 zero_indices = np.setdiff1d(np.arange(self.M), nonzero_indices)
                 B_all[zero_indices, idx] = 0
             B, b = np.split(B_all, [self.N], axis=1)
-            # save all tuning curves
-            self.B_all = B_all
             # calculate preferred tuning for each neuron
             self.tuning_prefs = utils.calculate_pref_tuning(
-                B=self.B_all, bf_centers=self.bf_centers, bf_scale=self.bf_scale,
+                B=B_all, bf_centers=self.bf_centers, bf_scale=self.bf_scale,
                 n_stimuli=10000, limits=(0, 1)
             )
 
@@ -266,10 +325,8 @@ class TriangularModel:
         ----------
         n_samples : int
             The number of samples.
-
         bin_width : float
             Sets the bin width for the Poisson model.
-
         random_state : RandomState or None
             The RandomState instance to draw samples with. If None, the
             RandomState instance of the class is used.
@@ -278,13 +335,10 @@ class TriangularModel:
         -------
         stimuli : np.ndarray, shape (n_samples,)
             The stimuli that generated the samples.
-
         X : np.ndarray, shape (n_samples, M)
             The tuning features for each stimulus.
-
         Y : np.ndarray, shape (n_samples, N)
             The non-target neural activity matrix.
-
         y : np.ndarray, shape (n_samples, 1)
             The target neural activity responses.
         """
@@ -293,43 +347,49 @@ class TriangularModel:
         else:
             random_state = check_random_state(random_state)
 
-        if self.parameter_design == 'basis_functions':
+        if self.parameter_design == 'piecewise':
+            X = random_state.uniform(
+                low=self.stim_kwargs['low'], high=self.stim_kwargs['high'],
+                size=(n_samples, self.M)
+            )
+        elif self.parameter_design == 'basis_functions':
             # draw stimulus and tuning features
             stimuli = random_state.uniform(low=0, high=1, size=n_samples)
             X = utils.calculate_tuning_features(stimuli, self.bf_centers, self.bf_scale)
-            # draw latent activity
-            Z = random_state.normal(loc=0, scale=1.0, size=(n_samples, self.K))
 
-            if self.model == 'linear':
-                # non-target private variability
-                psi_nt = np.sqrt(self.Psi_nt) * random_state.normal(
-                    loc=0,
-                    scale=1.0,
-                    size=(n_samples, self.N))
-                # non-target neural activity
-                Y = np.dot(X, self.B) + np.dot(Z, self.L_nt) + psi_nt
-                # target private variability
-                psi_t = np.sqrt(self.Psi_t) * random_state.normal(
-                    loc=0,
-                    scale=1.0,
-                    size=(n_samples, 1))
-                # target neural activity
-                y = np.dot(X, self.b) + np.dot(Y, self.a) + np.dot(Z, self.l_t) + psi_t
+        # draw latent activity
+        Z = random_state.normal(loc=0, scale=1.0, size=(n_samples, self.K))
 
-            elif self.model == 'poisson':
-                # non-target responses
-                non_target_pre_exp = np.dot(X, self.B) + np.dot(Z, self.L)
-                non_target_mu = np.exp(bin_width * non_target_pre_exp)
-                Y = random_state.poisson(lam=non_target_mu)
-                # target response
-                target_pre_exp = np.dot(X, self.b) + np.dot(Y, self.a) + np.dot(Z, self.l_t)
-                target_mu = np.exp(bin_width * target_pre_exp)
-                y = random_state.poisson(lam=target_mu)
+        if self.model == 'linear':
+            # non-target private variability
+            psi_nt = np.sqrt(self.Psi_nt) * random_state.normal(
+                loc=0,
+                scale=1.0,
+                size=(n_samples, self.N))
+            # non-target neural activity
+            Y = np.dot(X, self.B) + np.dot(Z, self.L_nt) + psi_nt
+            # target private variability
+            psi_t = np.sqrt(self.Psi_t) * random_state.normal(
+                loc=0,
+                scale=1.0,
+                size=(n_samples, 1))
+            # target neural activity
+            y = np.dot(X, self.b) + np.dot(Y, self.a) + np.dot(Z, self.l_t) + psi_t
 
-            if return_noise:
-                return stimuli, X, Y, y, Z
-            else:
-                return stimuli, X, Y, y
+        elif self.model == 'poisson':
+            # non-target responses
+            non_target_pre_exp = np.dot(X, self.B) + np.dot(Z, self.L)
+            non_target_mu = np.exp(bin_width * non_target_pre_exp)
+            Y = random_state.poisson(lam=non_target_mu)
+            # target response
+            target_pre_exp = np.dot(X, self.b) + np.dot(Y, self.a) + np.dot(Z, self.l_t)
+            target_mu = np.exp(bin_width * target_pre_exp)
+            y = random_state.poisson(lam=target_mu)
+
+        if return_noise:
+            return X, Y, y, Z
+        else:
+            return X, Y, y
 
     def identifiability_transform(self, delta):
         """Performs an identifiability transform on the parameters in the
@@ -386,11 +446,16 @@ class TriangularModel:
         variance : np.ndarray, shape (N,)
             The variance of the signal in each non-target neuron.
         """
-        variance = np.array([utils.bf_sum_var(
-            weights=self.B[:, neuron],
-            centers=self.bf_centers,
-            scale=self.bf_scale,
-            limits=limits) for neuron in range(self.N)])
+        if self.parameter_design == 'piecewise':
+            self.stim_var = self.calculate_variance(**self.stim_kwargs)
+            variance = self.stim_var * np.sum(self.B**2, axis=0)
+
+        elif self.parameter_design == 'basis_functions':
+            variance = np.array([utils.bf_sum_var(
+                weights=self.B[:, neuron],
+                centers=self.bf_centers,
+                scale=self.bf_scale,
+                limits=limits) for neuron in range(self.N)])
         return variance
 
     def non_target_variance(self, limits=(0, 1)):
@@ -427,11 +492,18 @@ class TriangularModel:
             The variance of the signal in the target neuron.
         """
         tuning_weights = self.b + self.B @ self.a
-        tuning_variance = utils.bf_sum_var(
-            weights=tuning_weights.ravel(),
-            centers=self.bf_centers,
-            scale=self.bf_scale,
-            limits=limits)
+
+        if self.parameter_design == 'piecewise':
+            self.stim_var = self.calculate_variance(**self.stim_kwargs)
+            tuning_variance = self.stim_var * np.sum(tuning_weights**2)
+        elif self.parameter_design == 'basis_functions':
+            tuning_weights = self.b + self.B @ self.a
+            tuning_variance = utils.bf_sum_var(
+                weights=tuning_weights.ravel(),
+                centers=self.bf_centers,
+                scale=self.bf_scale,
+                limits=limits)
+
         latent_variance = np.sum((self.L_nt @ self.a)**2)
         private_variance = self.a.ravel()**2 @ self.Psi_nt
         variance = tuning_variance + latent_variance + private_variance
@@ -493,7 +565,20 @@ class TriangularModel:
         else:
             raise ValueError('Value type for neuron not supported.')
 
-        if self.parameter_design == 'basis_functions':
+        if self.parameter_design == 'piecewise':
+            stimuli = np.arange(self.M)
+            for idx in to_plot:
+                # color of tuning curve depends on target, coupled, or non-coupled
+                if idx in self.coupled_indices:
+                    color = 'black'
+                elif idx in self.non_coupled_indices:
+                    color = 'gray'
+                elif idx == self.N:
+                    color = 'red'
+                ax.plot(stimuli, self.B_all[:, idx],
+                        color=color, marker='o', lw=3)
+
+        elif self.parameter_design == 'basis_functions':
             # get tuning curves for all neurons
             stimuli, tuning_curves = utils.calculate_tuning_curves(
                 B=self.B_all,
@@ -631,9 +716,6 @@ class TriangularModel:
         variance : float
             The variance of the distribution specified in props.
         """
-        # the key 'prior' specifies the type of distribution
-        distribution = kwargs['prior']
-
         if distribution == 'gaussian':
             sigma = kwargs['scale']
             variance = sigma**2
