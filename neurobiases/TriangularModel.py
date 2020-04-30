@@ -11,51 +11,41 @@ class TriangularModel:
 
     Parameters
     ----------
-    parameters : list of numpy arrays
-        A list containing the parameter values describing coupling (A)
-        and tuning (Bi, Bj).
+    model : string
+        Specifies either a 'linear' or 'poisson' model.
 
     parameter_design : string
-        The structure to impose on the parameters.
+        The structure to impose on the parameters: either 'random', 'piecewise' or
+        'basis_functions'.
 
-    coupling_props : dict
+    coupling_kwargs : dict
         A dictionary detailing the properties of the coupling parameters.
         These may include:
             - coupling dimension (N)
             - coupling sparsity
-            - coupling prior
+            - coupling distribution
             - coupling distribution parameters
 
-    tuning_props : dict
+    tuning_kwargs : dict
         A dictionary detailing the properties of the tuning parameters.
         These may include:
             - tuning dimension (M)
             - tuning sparsity
-            - tuning prior
+            - tuning distribution
             - tuning distribution parameters (loc, scale, low, high, etc.)
-            - tuning overlap proportions (f_coupling, f_non_coupling)
 
-    stim_props : dict
+    stim_kwargs : dict
         A dictionary detailing the properties of the stimulus parameters.
         These may include:
-            - stimulus prior
+            - stimulus distribution
             - stimulus distribution parameters (loc, scale, etc.)
 
-    kappa : float, optional
-        The inverse signal-to-noise ratio. If None, uses preset value of
-        kappa.
-
-    rho_c : float, optional
-        The value of noise correlation in each block of neurons. If None,
-        uses preset value of rho_c.
-
-    rho_b : float, optional
-        The value of noise correlation amongst all neurons not in the same
-        block (i.e., 'background' correlation). If None, uses preset value
-        of rho_b.
-
-    K : int, optional
-        The number of latent dimensions. If None, uses preset value of K.
+    noise_kwargs : dict
+        A dictionary detailing the properties of the shared variability
+        parameters.
+        These may include:
+            - The number of latent factors.
+            - The maximum and minimum noise correlations.
 
     random_state: int, RandomState instance or None, optional, default None
         The seed of the pseudo random number generator that selects a
@@ -281,12 +271,15 @@ class TriangularModel:
         """Generates the noise covariance structure for the triangular model."""
         # first get signal-to-noise ratio
         snr = self.noise_kwargs.get('snr', 3)
+        corr_max = self.noise_kwargs.get('corr_max', 0.2)
+        corr_min = self.noise_kwargs.get('corr_min', -0.05)
+        no_corr = (corr_max == 0) and (corr_min == 0)
         # get noise correlation structure based off tuning preferences
         noise_corr = utils.noise_correlation_matrix(
             tuning_prefs=self.tuning_prefs,
-            corr_max=self.noise_kwargs.get('corr_max', 0.2),
-            corr_min=self.noise_kwargs.get('corr_min', -0.05),
-            L=self.noise_kwargs.get('L', 1.),
+            corr_max=corr_max,
+            corr_min=corr_min,
+            L=self.noise_kwargs.get('L_corr', 1.),
             circular_stim=None)
         # separate non-target portion
         non_target_noise_corr = noise_corr[:-1, :-1]
@@ -296,7 +289,7 @@ class TriangularModel:
         non_target_noise_variance = non_target_signal_variance / snr
         non_target_noise_cov = utils.corr2cov(non_target_noise_corr,
                                               non_target_noise_variance)
-        if np.allclose(non_target_noise_cov, np.diag(np.diag(non_target_noise_cov))):
+        if no_corr:
             self.L_nt = np.zeros((self.K, self.N))
         else:
             lamb, W = np.linalg.eigh(non_target_noise_cov)
@@ -307,9 +300,13 @@ class TriangularModel:
         target_signal_variance = self.target_signal_variance()
         target_noise_variance = target_signal_variance / snr
         noise_cov = utils.corr2cov(noise_corr, target_noise_variance)
+        breakpoint()
         lamb, W = np.linalg.eigh(noise_cov)
         L = np.diag(np.sqrt(lamb[-self.K:])) @ W[:, -self.K:].T
-        self.l_t = L[:, -1][..., np.newaxis]
+        if no_corr:
+            self.l_t = np.zeros((self.K, 1))
+        else:
+            self.l_t = L[:, -1][..., np.newaxis]
         self.Psi_t = noise_cov[-1, -1] - (self.l_t.T @ self.l_t).item()
 
         # combine latent factors and private variances
@@ -733,3 +730,45 @@ class TriangularModel:
             raise ValueError('Chosen distribution not available.')
 
         return variance
+
+    @staticmethod
+    def generate_piecewise_kwargs(
+        M=50, tuning_sparsity=0.75, tuning_distribution='noisy_hann_window',
+        tuning_peak=150, tuning_bound_frac=0.25, tuning_diff_decay=2,
+        tuning_random_state=2332, N=20, coupling_sparsity=0.5,
+        coupling_distribution='symmetric_lognormal', coupling_loc=-1,
+        coupling_scale=0.5, coupling_random_state=2332, K=2, snr=3, corr_max=0.3,
+        corr_min=0.0, L_corr=1, stim_distribution='uniform', stim_low=0, stim_high=1
+    ):
+        """Generates a set of keyword argument dictionaries for the piecewise
+        formulated triangular model."""
+        tuning_kwargs = {
+            'M': M,
+            'sparsity': tuning_sparsity,
+            'distribution': tuning_distribution,
+            'peak': tuning_peak,
+            'bound_frac': tuning_bound_frac,
+            'tuning_diff_decay': tuning_diff_decay,
+            'random_state': tuning_random_state,
+        }
+        coupling_kwargs = {
+            'N': N,
+            'sparsity': coupling_sparsity,
+            'distribution': coupling_distribution,
+            'loc': coupling_loc,
+            'scale': coupling_scale,
+            'random_state': coupling_random_state,
+        }
+        noise_kwargs = {
+            'K': K,
+            'snr': snr,
+            'corr_max': corr_max,
+            'corr_min': corr_min,
+            'L_corr': L_corr
+        }
+        stim_kwargs = {
+            'distribution': stim_distribution,
+            'low': stim_low,
+            'high': stim_high
+        }
+        return tuning_kwargs, coupling_kwargs, noise_kwargs, stim_kwargs
