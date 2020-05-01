@@ -1,7 +1,9 @@
-from .TriangularModel import TriangularModel
 from .EMSolver import EMSolver
+from .TCSolver import TCSolver
+from .TriangularModel import TriangularModel
 
-__all__ = ["TriangularModel",
-           "EMSolver"]
+__all__ = ["EMSolver",
+           "TCSolver",
+           "TriangularModel"]
 
 name = "neurobiases"

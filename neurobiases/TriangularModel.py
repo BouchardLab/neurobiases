@@ -269,49 +269,99 @@ class TriangularModel:
 
     def generate_noise_structure(self):
         """Generates the noise covariance structure for the triangular model."""
-        # first get signal-to-noise ratio
+        noise_structure = self.noise_kwargs.get('noise_structure')
         snr = self.noise_kwargs.get('snr', 3)
-        corr_max = self.noise_kwargs.get('corr_max', 0.2)
-        corr_min = self.noise_kwargs.get('corr_min', -0.05)
-        no_corr = (corr_max == 0) and (corr_min == 0)
-        # get noise correlation structure based off tuning preferences
-        noise_corr = utils.noise_correlation_matrix(
-            tuning_prefs=self.tuning_prefs,
-            corr_max=corr_max,
-            corr_min=corr_min,
-            L=self.noise_kwargs.get('L_corr', 1.),
-            circular_stim=None)
-        # separate non-target portion
-        non_target_noise_corr = noise_corr[:-1, :-1]
 
-        # calculate latent factors and private variances for non-target neurons
-        non_target_signal_variance = self.non_target_signal_variance()
-        non_target_noise_variance = non_target_signal_variance / snr
-        non_target_noise_cov = utils.corr2cov(non_target_noise_corr,
-                                              non_target_noise_variance)
-        if no_corr:
-            self.L_nt = np.zeros((self.K, self.N))
-        else:
-            lamb, W = np.linalg.eigh(non_target_noise_cov)
-            self.L_nt = np.diag(np.sqrt(lamb[-self.K:])) @ W[:, -self.K:].T
-        self.Psi_nt = np.diag(non_target_noise_cov) - np.diag(self.L_nt.T @ self.L_nt)
+        if noise_structure == 'clusters':
+            corr_cluster = self.noise_kwargs.get('corr_cluster', 0.1)
+            corr_back = self.noise_kwargs.get('corr_back', 0.)
 
-        # calculate latent factors and private variance for target neuron
-        target_signal_variance = self.target_signal_variance()
-        target_noise_variance = target_signal_variance / snr
-        noise_cov = utils.corr2cov(noise_corr, target_noise_variance)
-        breakpoint()
-        lamb, W = np.linalg.eigh(noise_cov)
-        L = np.diag(np.sqrt(lamb[-self.K:])) @ W[:, -self.K:].T
-        if no_corr:
-            self.l_t = np.zeros((self.K, 1))
-        else:
-            self.l_t = L[:, -1][..., np.newaxis]
-        self.Psi_t = noise_cov[-1, -1] - (self.l_t.T @ self.l_t).item()
+            non_target_signal_variance = self.non_target_signal_variance()
+            non_target_noise_variance = non_target_signal_variance / snr
 
-        # combine latent factors and private variances
-        self.L = np.concatenate((self.L_nt, self.l_t), axis=1)
-        self.Psi = np.append(self.Psi_nt, self.Psi_t)
+            # latent factors for non-target shared variability
+            L_nt = np.zeros((self.N, self.K + 1))
+            # one basis vector will provide the background noise correlation
+            L_nt[:, -1] = np.sqrt(corr_back * non_target_noise_variance)
+
+            # split up the variances into the K clusters of correlated neurons
+            corr_clusters = np.array_split(np.sqrt(non_target_noise_variance), self.K)
+            indices = np.array_split(np.arange(self.N), self.K)
+
+            # iterate over the K clusters, each of which will set a latent factor
+            for lf_idx, group in enumerate(zip(corr_clusters, indices)):
+                # get curretn cluster
+                cluster_vars, cluster_idx = group
+                # place the correct values in the latent factor
+                L_nt[cluster_idx, lf_idx] = cluster_vars * np.sqrt(
+                    corr_cluster - corr_back
+                )
+
+            non_target_noise_cov = np.dot(L_nt, L_nt.T)
+            np.fill_diagonal(non_target_noise_cov, non_target_noise_variance)
+            self.L_nt = L_nt.T
+            self.Psi_nt = np.diag(non_target_noise_cov - L_nt @ L_nt.T)
+
+            # calculate latent factors and private variance for target neuron
+            target_signal_variance = self.target_signal_variance()
+            target_noise_variance = target_signal_variance / snr
+
+            # place the target neuron in the middle group
+            target_group_idx = int(np.ceil(self.K / 2 - 1))
+            # the latent basis vector from before needs to be appended to account
+            # for the target neuron
+            self.l_t = np.zeros((self.K + 1, 1))
+            self.l_t[target_group_idx] = \
+                np.sqrt(target_noise_variance) * np.sqrt(corr_cluster - corr_back)
+            # add on the background noise correlation term
+            self.l_t[-1] = np.sqrt(corr_back * target_noise_variance)
+            self.Psi_t = target_noise_variance - (self.l_t.T @ self.l_t).item()
+
+            # combine latent factors and private variances
+            self.L = np.concatenate((self.L_nt, self.l_t), axis=1)
+            self.Psi = np.append(self.Psi_nt, self.Psi_t)
+
+        elif noise_structure == 'falloff':
+            corr_max = self.noise_kwargs.get('corr_max', 0.2)
+            corr_min = self.noise_kwargs.get('corr_min', -0.05)
+            no_corr = (corr_max == 0) and (corr_min == 0)
+            # get noise correlation structure based off tuning preferences
+            noise_corr = utils.noise_correlation_matrix(
+                tuning_prefs=self.tuning_prefs,
+                corr_max=corr_max,
+                corr_min=corr_min,
+                L=self.noise_kwargs.get('L_corr', 1.),
+                circular_stim=None)
+            # separate non-target portion
+            non_target_noise_corr = noise_corr[:-1, :-1]
+
+            # calculate latent factors and private variances for non-target neurons
+            non_target_signal_variance = self.non_target_signal_variance()
+            non_target_noise_variance = non_target_signal_variance / snr
+            non_target_noise_cov = utils.corr2cov(non_target_noise_corr,
+                                                  non_target_noise_variance)
+            if no_corr:
+                self.L_nt = np.zeros((self.K, self.N))
+            else:
+                lamb, W = np.linalg.eigh(non_target_noise_cov)
+                self.L_nt = np.diag(np.sqrt(lamb[-self.K:])) @ W[:, -self.K:].T
+            self.Psi_nt = np.diag(non_target_noise_cov) - np.diag(self.L_nt.T @ self.L_nt)
+
+            # calculate latent factors and private variance for target neuron
+            target_signal_variance = self.target_signal_variance()
+            target_noise_variance = target_signal_variance / snr
+            noise_cov = utils.corr2cov(noise_corr, target_noise_variance)
+            lamb, W = np.linalg.eigh(noise_cov)
+            L = np.diag(np.sqrt(lamb[-self.K:])) @ W[:, -self.K:].T
+            if no_corr:
+                self.l_t = np.zeros((self.K, 1))
+            else:
+                self.l_t = L[:, -1][..., np.newaxis]
+            self.Psi_t = noise_cov[-1, -1] - (self.l_t.T @ self.l_t).item()
+
+            # combine latent factors and private variances
+            self.L = np.concatenate((self.L_nt, self.l_t), axis=1)
+            self.Psi = np.append(self.Psi_nt, self.Psi_t)
 
     def generate_samples(
         self, n_samples, bin_width=0.5, random_state=None, return_noise=False
@@ -349,13 +399,15 @@ class TriangularModel:
                 low=self.stim_kwargs['low'], high=self.stim_kwargs['high'],
                 size=(n_samples, self.M)
             )
+            # draw latent activity
+            Z = random_state.normal(loc=0, scale=1.0, size=(n_samples, self.K + 1))
+
         elif self.parameter_design == 'basis_functions':
             # draw stimulus and tuning features
             stimuli = random_state.uniform(low=0, high=1, size=n_samples)
             X = utils.calculate_tuning_features(stimuli, self.bf_centers, self.bf_scale)
-
-        # draw latent activity
-        Z = random_state.normal(loc=0, scale=1.0, size=(n_samples, self.K))
+            # draw latent activity
+            Z = random_state.normal(loc=0, scale=1.0, size=(n_samples, self.K))
 
         if self.model == 'linear':
             # non-target private variability
@@ -737,7 +789,8 @@ class TriangularModel:
         tuning_peak=150, tuning_bound_frac=0.25, tuning_diff_decay=2,
         tuning_random_state=2332, N=20, coupling_sparsity=0.5,
         coupling_distribution='symmetric_lognormal', coupling_loc=-1,
-        coupling_scale=0.5, coupling_random_state=2332, K=2, snr=3, corr_max=0.3,
+        coupling_scale=0.5, coupling_random_state=2332, K=2, snr=3,
+        noise_structure='clusters', corr_cluster=0.2, corr_back=0., corr_max=0.3,
         corr_min=0.0, L_corr=1, stim_distribution='uniform', stim_low=0, stim_high=1
     ):
         """Generates a set of keyword argument dictionaries for the piecewise
@@ -759,13 +812,22 @@ class TriangularModel:
             'scale': coupling_scale,
             'random_state': coupling_random_state,
         }
-        noise_kwargs = {
-            'K': K,
-            'snr': snr,
-            'corr_max': corr_max,
-            'corr_min': corr_min,
-            'L_corr': L_corr
-        }
+        if noise_structure == 'clusters':
+            noise_kwargs = {
+                'K': K,
+                'noise_structure': noise_structure,
+                'corr_back': corr_back,
+                'corr_cluster': corr_cluster
+            }
+        elif noise_structure == 'falloff':
+            noise_kwargs = {
+                'K': K,
+                'noise_structure': noise_structure,
+                'snr': snr,
+                'corr_max': corr_max,
+                'corr_min': corr_min,
+                'L_corr': L_corr
+            }
         stim_kwargs = {
             'distribution': stim_distribution,
             'low': stim_low,
