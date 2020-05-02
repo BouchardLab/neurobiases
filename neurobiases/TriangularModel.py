@@ -13,11 +13,9 @@ class TriangularModel:
     ----------
     model : string
         Specifies either a 'linear' or 'poisson' model.
-
     parameter_design : string
         The structure to impose on the parameters: either 'random', 'piecewise' or
         'basis_functions'.
-
     coupling_kwargs : dict
         A dictionary detailing the properties of the coupling parameters.
         These may include:
@@ -25,7 +23,6 @@ class TriangularModel:
             - coupling sparsity
             - coupling distribution
             - coupling distribution parameters
-
     tuning_kwargs : dict
         A dictionary detailing the properties of the tuning parameters.
         These may include:
@@ -33,20 +30,17 @@ class TriangularModel:
             - tuning sparsity
             - tuning distribution
             - tuning distribution parameters (loc, scale, low, high, etc.)
-
     stim_kwargs : dict
         A dictionary detailing the properties of the stimulus parameters.
         These may include:
             - stimulus distribution
             - stimulus distribution parameters (loc, scale, etc.)
-
     noise_kwargs : dict
         A dictionary detailing the properties of the shared variability
         parameters.
         These may include:
             - The number of latent factors.
             - The maximum and minimum noise correlations.
-
     random_state: int, RandomState instance or None, optional, default None
         The seed of the pseudo random number generator that selects a
         random feature to update. If int, random_state is the seed used
@@ -106,10 +100,8 @@ class TriangularModel:
         -------
         a : np.ndarray, shape (N, 1).
             The coupling parameters.
-
         b : np.ndarray, shape (M, 1).
             The target tuning parameters.
-
         B : np.ndarray, shape (M, N)
             The non-target tuning parameters.
         """
@@ -319,6 +311,8 @@ class TriangularModel:
 
             # combine latent factors and private variances
             self.L = np.concatenate((self.L_nt, self.l_t), axis=1)
+            self.L = utils.symmetric_low_rank_approx(np.dot(self.L.T, self.L), self.K).T
+            self.L_nt, self.l_t = np.split(self.L, [self.N], axis=1)
             self.Psi = np.append(self.Psi_nt, self.Psi_t)
 
         elif noise_structure == 'falloff':
@@ -399,15 +393,14 @@ class TriangularModel:
                 low=self.stim_kwargs['low'], high=self.stim_kwargs['high'],
                 size=(n_samples, self.M)
             )
-            # draw latent activity
-            Z = random_state.normal(loc=0, scale=1.0, size=(n_samples, self.K + 1))
 
         elif self.parameter_design == 'basis_functions':
             # draw stimulus and tuning features
             stimuli = random_state.uniform(low=0, high=1, size=n_samples)
             X = utils.calculate_tuning_features(stimuli, self.bf_centers, self.bf_scale)
-            # draw latent activity
-            Z = random_state.normal(loc=0, scale=1.0, size=(n_samples, self.K))
+
+        # draw latent activity
+        Z = random_state.normal(loc=0, scale=1.0, size=(n_samples, self.K))
 
         if self.model == 'linear':
             # non-target private variability
@@ -454,32 +447,33 @@ class TriangularModel:
             delta = delta[..., np.newaxis]
 
         # grab latent factors
-        l_t = self._L[0, :self.K][..., np.newaxis]
-        L_nt = self._L[1:, :self.K].T
+        l_t = np.copy(self.l_t)
+        L_nt = np.copy(self.L_nt)
         # grab private variances
-        Psi_t = self._Psi[0, 0]
-        Psi_nt = self._Psi[1:, 1:]
+        Psi_t = self.Psi_t
+        Psi_nt = np.diag(self.Psi_nt)
 
         # perturbation for coupling terms
         Delta = -np.linalg.solve(Psi_nt + np.dot(L_nt.T, L_nt),
                                  np.dot(L_nt.T, delta))
-
         # create augmented variables
         delta_aug = delta + np.dot(L_nt, Delta)
-        L_aug = l_t + np.dot(L_nt, self.A)
+        L_aug = l_t + np.dot(L_nt, self.a)
 
         # correction for target private variance
         Psi_t_correction = \
-            - 2 * np.dot(Delta.T, np.dot(Psi_nt, self.A)).ravel() \
+            - 2 * np.dot(Delta.T, np.dot(Psi_nt, self.a)).ravel() \
             - np.dot(Delta.T, np.dot(Psi_nt, Delta)).ravel() \
             - np.dot(delta_aug.T, delta_aug) \
             - 2 * np.dot(L_aug.T, delta_aug)
 
         # apply corrections
-        self._Psi[0, 0] = Psi_t + Psi_t_correction
-        self._L[0, :self.K] = self._L[0, :self.K] + delta.ravel()
-        self.A = self.A + Delta
-        self.Bi = self.Bi - np.dot(self.Bj, Delta)
+        self.Psi_t = (Psi_t + Psi_t_correction).item()
+        self.Psi[-1] = self.Psi_t
+        self.l_t = (self.l_t.ravel() + delta.ravel())[..., np.newaxis]
+        self.L[:, -1] = self.l_t.ravel()
+        self.a = self.a + Delta
+        self.b = self.b - np.dot(self.B, Delta)
 
     def non_target_signal_variance(self, limits=(0, 1)):
         """Calculates the variance of the non-target signal, i.e., variance
@@ -588,7 +582,6 @@ class TriangularModel:
             only non-target tuning curves are plotted. If 'target', only target
             tuning curves are plotted. If array-like, contains the neurons
             to plot directly.
-
         fax : tuple of mpl.figure and mpl.axes, or None
             The figure and axes. If None, a new set will be created.
 
@@ -658,17 +651,14 @@ class TriangularModel:
         ----------
         distribution : string
             The distribution to draw parameters from.
-
         size : tuple of ints
             The number of samples to draw, in a desired shape.
-
         random_state: int, RandomState instance or None, optional, default None
             The seed of the pseudo random number generator that selects a
             random feature to update. If int, random_state is the seed used by
             the random number generator; If RandomState instance, random_state
             is the random number generator; If None, the random number
             generator is the RandomState instance used by np.random.
-
         kwargs : dict
             Remaining arguments containing the properties of the distribution
             from which to draw parameters.
@@ -755,7 +745,6 @@ class TriangularModel:
         ----------
         distribution : string
             The distribution of which to calculate the variance.
-
         kwargs : dict
             Remaining arguments containing the properties of the distribution
             from which to draw parameters.
