@@ -1,5 +1,6 @@
 import h5py
 import neurobiases.utils as utils
+import neurobiases.plot as plot
 import numpy as np
 
 from scipy.stats import truncexpon
@@ -433,7 +434,7 @@ class TriangularModel:
         else:
             return X, Y, y
 
-    def identifiability_transform(self, delta):
+    def identifiability_transform(self, delta, update=True):
         """Performs an identifiability transform on the parameters in the
         model.
 
@@ -441,6 +442,10 @@ class TriangularModel:
         ----------
         delta : np.ndarray, shape (K,) or (K, 1)
             The identifiability transform.
+
+        update : bool
+            If true, class parameters will be updated. Otherwise, the
+            transformed parameters will be returned.
         """
         # make sure delta has the correct number of dimensions
         if delta.ndim == 1:
@@ -468,12 +473,26 @@ class TriangularModel:
             - 2 * np.dot(L_aug.T, delta_aug)
 
         # apply corrections
-        self.Psi_t = (Psi_t + Psi_t_correction).item()
-        self.Psi[-1] = self.Psi_t
-        self.l_t = (self.l_t.ravel() + delta.ravel())[..., np.newaxis]
-        self.L[:, -1] = self.l_t.ravel()
-        self.a = self.a + Delta
-        self.b = self.b - np.dot(self.B, Delta)
+        a = self.a + Delta
+        b = self.b - np.dot(self.B, Delta)
+        # private variability
+        Psi_t = (Psi_t + Psi_t_correction).item()
+        Psi = np.copy(self.Psi)
+        Psi[-1] = Psi_t
+        # latent factors
+        l_t = (self.l_t.ravel() + delta.ravel())[..., np.newaxis]
+        L = np.copy(self.L)
+        L[:, -1] = l_t.ravel()
+
+        if update:
+            self.Psi_t = Psi_t
+            self.Psi[-1] = self.Psi_t
+            self.l_t = np.copy(l_t)
+            self.L = np.copy(L)
+            self.a = np.copy(a)
+            self.b = np.copy(b)
+        else:
+            return a, b, Psi, L
 
     def non_target_signal_variance(self, limits=(0, 1)):
         """Calculates the variance of the non-target signal, i.e., variance
@@ -593,7 +612,7 @@ class TriangularModel:
         fax : tuple of mpl.figure and mpl.axes
             The figure and axes, with tuning curves plotted.
         """
-        fig, ax = utils.check_fax(fax, figsize=(12, 6))
+        fig, ax = plot.check_fax(fax, figsize=(12, 6))
 
         # figure out which neurons need to be plotted
         if neuron == 'all':
