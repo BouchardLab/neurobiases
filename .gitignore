@@ -1,3 +1,5 @@
+*.pdf
+
 # updates to gitignore
 .vscode/
 

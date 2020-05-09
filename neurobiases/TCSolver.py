@@ -1,5 +1,6 @@
 import numpy as np
 
+from scipy.optimize import nnls
 from sklearn.linear_model import LinearRegression
 
 
@@ -57,13 +58,13 @@ class TCSolver():
         """
         # coupling parameters mask
         if a_mask is None:
-            self.a_mask = np.ones(self.N)
+            self.a_mask = np.ones(self.N).astype(bool)
         else:
             self.a_mask = a_mask.ravel()
 
         # tuning parameters mask
         if b_mask is None:
-            self.b_mask = np.ones(self.M)
+            self.b_mask = np.ones(self.M).astype(bool)
         else:
             self.b_mask = b_mask.ravel()
 
@@ -93,4 +94,29 @@ class TCSolver():
         ols.fit(Z, self.y.ravel())
         # extract fits into masked arrays
         b_hat[self.b_mask], a_hat[self.a_mask] = np.split(ols.coef_, [self.n_nonzero_tuning])
+        return a_hat, b_hat
+
+    def fit_nnls(self):
+        """Fit non-negative least squares to the data.
+
+        Returns
+        -------
+        a_hat : np.ndarray, shape (N,)
+            The fitted coupling parameters.
+        b_hat : nd-array, shape (M,)
+            The fitted tuning parameters.
+        """
+        # initialize storage
+        a_hat = np.zeros(self.N)
+        b_hat = np.zeros(self.M)
+        # apply masks
+        X = self.X[:, self.b_mask]
+        Y = self.Y[:, self.a_mask]
+        # form design matrix
+        Z = np.concatenate((X, Y), axis=1)
+        # fit OLS
+        coefs, _ = nnls(Z, self.y.ravel())
+        # extract fits into masked arrays
+        breakpoint()
+        b_hat[self.b_mask], a_hat[self.a_mask] = np.split(coefs, [self.n_nonzero_tuning])
         return a_hat, b_hat
