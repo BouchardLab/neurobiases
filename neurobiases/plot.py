@@ -79,7 +79,9 @@ def tighten_scatter_plot(ax, bounds, line_kwargs=None):
     return ax
 
 
-def plot_tc_fits(a_hat, a_true, b_hat, b_true, fax=None, color='black'):
+def plot_tc_fits(
+    a_hat, a_true, b_hat, b_true, fax=None, color='black', edgecolor='white'
+):
     """Scatters estimated tuning and coupling fits against ground truth fits.
 
     Parameters
@@ -101,7 +103,7 @@ def plot_tc_fits(a_hat, a_true, b_hat, b_true, fax=None, color='black'):
     max_a = np.max([np.abs(a_hat), np.abs(a_true)])
     axes[0].scatter(a_true, a_hat,
                     color=color,
-                    edgecolor='white',
+                    edgecolor=edgecolor,
                     s=50)
     tighten_scatter_plot(axes[0], bounds=[-1.1 * max_a, 1.1 * max_a],
                          line_kwargs={'color': 'gray', 'linewidth': 1.5})
@@ -110,7 +112,7 @@ def plot_tc_fits(a_hat, a_true, b_hat, b_true, fax=None, color='black'):
     min_b = min(0, np.min([b_hat, b_true]))
     axes[1].scatter(b_true, b_hat,
                     color=color,
-                    edgecolor='white',
+                    edgecolor=edgecolor,
                     s=50)
     tighten_scatter_plot(axes[1], bounds=[min_b - 0.1 * np.abs(min_b), 1.1 * max_b],
                          line_kwargs={'color': 'gray', 'linewidth': 1.5})
