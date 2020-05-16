@@ -1,8 +1,8 @@
 import numpy as np
 import torch
 
+from neurobiases import solver_utils as utils
 from scipy.optimize import minimize
-from sklearn.linear_model import LinearRegression
 from sklearn.utils import check_random_state
 
 
@@ -14,47 +14,33 @@ class EMSolver():
     ----------
     X : np.ndarray, shape (D, M)
         Design matrix for tuning features.
-
     Y : np.ndarray, shape (D, N)
         Design matrix for coupling features.
-
     y : np.ndarray, shape (D, 1)
         Neural response vector.
-
     K : int
         Number of latent factors.
-
     a_mask : np.ndarray, shape (N, 1)
         Mask for coupling features.
-
     b_mask : nd-array, shape (M, 1)
         Mask for tuning features.
-
     B_mask : nd-array, shape (N, M)
         Mask for non-target neuron tuning features.
-
     B : np.ndarray, shape (M, N)
         The non-target tuning parameters.
-
     L_nt : np.ndarray, shape (K, N)
         The non-target latent factors.
-
     L : np.ndarray, shape (K, N+1)
         All latent factors. This variable takes precedence over L_nt.
-
     log_Psi_nt : np.ndarray, shape (N,)
         The non-target private variances.
-
     log_Psi : np.ndarray, shape (N + 1,)
         The private variances. This variable takes precedence over
         log_Psi_nt.
-
     max_iter : int
         The maximum number of optimization iterations to perform.
-
     tol : float
         The tolerance with which the cease optimization.
-
     random_state : RandomState or int or None
         RandomState object, or int to create RandomState object.
     """
@@ -101,9 +87,8 @@ class EMSolver():
         self.B = np.zeros((self.M, self.N))
         # private variances
         self.log_Psi = np.zeros(self.N + 1)
-        # latent factors (shared variance parameters) are initialized to be
-        # small and random values
-        self.L = self.random_state.normal(size=(self.K, self.N + 1)) / 100
+        # latent factors are initialized to be small, random values
+        self.L = self.random_state.normal(loc=0., scale=0.1, size=(self.K, self.N + 1))
 
     def set_masks(self, a_mask=None, b_mask=None, B_mask=None):
         """Initialize masks. A value of None indicates that all features will
@@ -113,10 +98,8 @@ class EMSolver():
         ----------
         a_mask : np.ndarray, shape (N, 1)
             Mask for coupling features.
-
         b_mask : nd-array, shape (M, 1)
             Mask for tuning features.
-
         B_mask : nd-array, shape (N, M)
             Mask for non-target neuron tuning features.
         """
@@ -125,13 +108,11 @@ class EMSolver():
             self.a_mask = np.ones((self.N, 1))
         else:
             self.a_mask = a_mask.reshape((self.N, 1))
-
         # tuning parameters mask
         if b_mask is None:
             self.b_mask = np.ones((self.M, 1))
         else:
             self.b_mask = b_mask.reshape((self.M, 1))
-
         # non-target tuning parameters mask
         if B_mask is None:
             self.B_mask = np.ones((self.M, self.N))
@@ -145,16 +126,12 @@ class EMSolver():
         ----------
         a : np.ndarray, shape (N, 1)
             The coupling parameters.
-
         b : np.ndarray, shape (M, 1)
             The tuning parameters.
-
         B : np.ndarray, shape (M, N)
             The non-target tuning parameters.
-
         log_Psi : np.ndarray, shape (N + 1,)
             The private variances.
-
         L : np.ndarray, shape (K, N+1)
             The latent factors.
         """
@@ -170,8 +147,8 @@ class EMSolver():
             self.L = np.copy(L.reshape((self.K, self.N + 1)))
 
     def freeze_B(self, B=None):
-        """Sets all (or a subset of) the variance parameters, and freezes them
-        so that they cannot be trained.
+        """Sets all (or a subset of) the non-target tuning parameters, and
+        freezes them so that they cannot be trained.
 
         Parameters
         ----------
@@ -194,13 +171,10 @@ class EMSolver():
         ----------
         L_nt : np.ndarray, shape (K, N)
             The non-target latent factors.
-
         L : np.ndarray, shape (K, N+1)
             All latent factors. This variable takes precedence over L_nt.
-
         log_Psi_nt : np.ndarray, shape (N,)
             The non-target private variances.
-
         log_Psi : np.ndarray, shape (N + 1,)
             The private variances. This variable takes precedence over
             log_Psi_nt.
@@ -212,7 +186,6 @@ class EMSolver():
             self.train_L_nt = False
         else:
             self.train_L_nt = True
-
         # initialize all latent factors
         if L is not None:
             self.L_init = L
@@ -220,7 +193,6 @@ class EMSolver():
             self.train_L = False
         else:
             self.train_L = True
-
         # initialize all non-target private variances
         if log_Psi_nt is not None:
             self.log_Psi_nt_init = log_Psi_nt
@@ -228,7 +200,6 @@ class EMSolver():
             self.train_log_Psi_nt = False
         else:
             self.train_log_Psi_nt = True
-
         # initialize all private variances
         if log_Psi is not None:
             self.log_Psi_init = log_Psi
@@ -295,16 +266,12 @@ class EMSolver():
         -------
         a : np.ndarray, shape (N, 1)
             The coupling parameters.
-
         b : np.ndarray, shape (M, 1)
             The tuning parameters.
-
         B : np.ndarray, shape (M, N)
             The non-target tuning parameters.
-
         log_Psi : np.ndarray, shape (N + 1,)
             The private variances.
-
         L : np.ndarray, shape (K, N+1)
             The latent factors.
         """
@@ -343,10 +310,8 @@ class EMSolver():
         ----------
         X : np.ndarray, shape (D, M)
             Design matrix for tuning features.
-
         Y : np.ndarray, shape (D, N)
             Design matrix for coupling features.
-
         y : np.ndarray, shape (D, 1)
             Neural response vector.
 
@@ -363,8 +328,11 @@ class EMSolver():
         if y is None:
             y = self.y
 
-        mll = self.mll(self.get_params(), X, Y, y, self.K,
-                       self.a_mask, self.b_mask, self.B_mask)
+        mll = utils.marginal_log_likelihood_linear_tm(
+            X=X, Y=Y, y=y, a=self.a, b=self.b, B=self.B, L=self.L,
+            Psi=np.exp(self.log_Psi), a_mask=self.a_mask, b_mask=self.b_mask,
+            B_mask=self.B_mask
+        )
         return mll
 
     def marginal_likelihood_hessian(self):
@@ -421,7 +389,6 @@ class EMSolver():
         -------
         mu : np.ndarray, shape (D, K)
             The expected value of the latent state across samples.
-
         zz : np.ndarray, shape (D, K, K)
             The expected second-order statistics of the latent state across
             samples.
@@ -465,14 +432,11 @@ class EMSolver():
         ----------
         mu : np.ndarray, shape (D, K)
             The expected value of the latent state across samples.
-
         zz : np.ndarray, shape (D, K, K)
             The expected second-order statistics of the latent state across
             samples.
-
         sigma : np.ndarray, shape (K, K)
             The covariance of the latent states.
-
         verbose : bool
             If True, print callback statements.
 
@@ -514,10 +478,8 @@ class EMSolver():
         ----------
         verbose : bool
             If True, print out EM iteration updates.
-
         mstep_verbose : bool
             If True, print out M-step iteration updates.
-
         mll_curve : bool
             If True, return a curve containing the marginal likelihoods at
             each step of optimization.
@@ -565,42 +527,6 @@ class EMSolver():
             return mlls[:iteration]
         else:
             return self
-
-    def fit_itsfa(
-        self, max_iter=25, n_latent_max=20, n_fa_splits=5,
-        tol=1e-3, r2_convergence=True, verbose=False
-    ):
-        """Calculates fits according to ITSFA."""
-        X = self.X
-        Y = self.Y
-        y = self.y
-        a_mask = self.a_mask.ravel()
-        b_mask = self.b_mask.ravel()
-
-        if self.train_B:
-            B = np.zeros((self.M, self.N))
-
-            # fit coefficient for each neuron
-            for neuron in range(self.N):
-                mask = self.B_mask[:, neuron].astype('bool')
-
-                # fit least squares regression (no selection or intercept)
-                ols = LinearRegression(fit_intercept=False)
-                ols.fit(X[:, mask], Y[:, neuron])
-                B[mask, neuron] = ols.coef_
-        else:
-            B = self.B
-
-        results = SEMSolver.itsfa(
-            X=X, Yj=Y, Yi=y.ravel(),
-            tuning_selection=b_mask,
-            coupling_selection=a_mask,
-            Bj_hats=B, Bj_hats_intercepts=np.zeros(self.N))
-
-        self.a = results['A_hat'][..., np.newaxis]
-        self.b = results['Bi_hat'][..., np.newaxis]
-        self.B = B
-        return self
 
     def fit_ml(self, verbose=False):
         """Fit the parameters using maximum likelihood."""
@@ -674,10 +600,8 @@ class EMSolver():
         ----------
         constraint : string
             The identifiability constraint.
-
         a_mask : np.ndarray, shape (N, 1)
             Mask for coupling features.
-
         b_mask : nd-array, shape (M, 1)
             Mask for tuning features.
 
