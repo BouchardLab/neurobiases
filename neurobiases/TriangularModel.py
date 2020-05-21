@@ -15,8 +15,8 @@ class TriangularModel:
     model : string
         Specifies either a 'linear' or 'poisson' model.
     parameter_design : string
-        The structure to impose on the parameters: either 'random', 'piecewise' or
-        'basis_functions'.
+        The structure to impose on the parameters: either 'random',
+        'direct_response' or 'basis_functions'.
     coupling_kwargs : dict
         A dictionary detailing the properties of the coupling parameters.
         These may include:
@@ -137,7 +137,7 @@ class TriangularModel:
             b = B_all[:, 0]
             B = B_all[:, 1:]
 
-        elif self.parameter_design == 'piecewise':
+        elif self.parameter_design == 'direct_response':
             b = np.zeros((self.M, 1))
             B = np.zeros((self.M, self.N))
 
@@ -199,7 +199,7 @@ class TriangularModel:
         elif self.parameter_design == 'basis_functions':
             # get basis function centers and width
             self.bf_centers = np.linspace(0, 1, self.M)
-            self.bf_scale = self.tuning_kwargs.get('bf_scale', 0.5 / self.M)
+            self.bf_scale = self.tuning_kwargs.get('bf_scale', 0.25 / self.M)
 
             # get preferred tunings for each neuron
             non_target_tuning = np.linspace(0, 1, self.N)
@@ -389,7 +389,7 @@ class TriangularModel:
         else:
             random_state = check_random_state(random_state)
 
-        if self.parameter_design == 'piecewise':
+        if self.parameter_design == 'direct_response':
             X = random_state.uniform(
                 low=self.stim_kwargs['low'], high=self.stim_kwargs['high'],
                 size=(n_samples, self.M)
@@ -508,7 +508,7 @@ class TriangularModel:
         variance : np.ndarray, shape (N,)
             The variance of the signal in each non-target neuron.
         """
-        if self.parameter_design == 'piecewise':
+        if self.parameter_design == 'direct_response':
             self.stim_var = self.calculate_variance(**self.stim_kwargs)
             variance = self.stim_var * np.sum(self.B**2, axis=0)
 
@@ -555,7 +555,7 @@ class TriangularModel:
         """
         tuning_weights = self.b + self.B @ self.a
 
-        if self.parameter_design == 'piecewise':
+        if self.parameter_design == 'direct_response':
             self.stim_var = self.calculate_variance(**self.stim_kwargs)
             tuning_variance = self.stim_var * np.sum(tuning_weights**2)
         elif self.parameter_design == 'basis_functions':
@@ -626,7 +626,7 @@ class TriangularModel:
         else:
             raise ValueError('Value type for neuron not supported.')
 
-        if self.parameter_design == 'piecewise':
+        if self.parameter_design == 'direct_response':
             stimuli = np.arange(self.M)
             for idx in to_plot:
                 # color of tuning curve depends on target, coupled, or non-coupled
@@ -792,7 +792,7 @@ class TriangularModel:
         return variance
 
     @staticmethod
-    def generate_piecewise_kwargs(
+    def generate_kwargs(
         M=50, tuning_sparsity=0.75, tuning_distribution='noisy_hann_window',
         tuning_peak=150, tuning_bound_frac=0.25, tuning_diff_decay=2,
         tuning_random_state=2332, N=20, coupling_sparsity=0.5,
