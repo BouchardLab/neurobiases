@@ -210,7 +210,7 @@ class EMSolver():
 
     def reset_params(self):
         """Reset parameter estimates. If parameter estimates were trained,
-        then they are """
+        then they are reset to their initial values."""
         self.a = np.zeros((self.N, 1))
         self.b = np.zeros((self.M, 1))
 
@@ -304,7 +304,7 @@ class EMSolver():
         """Calculates the marginal likelihood of the neural activities given
         the stimulus and current parameter estimates. Can optionally accept
         new data for comparison across datasets. This function acts as an
-        accessor to a static marginal likelihood function.
+        accessor to an external marginal likelihood function.
 
         Parameters
         ----------

@@ -275,7 +275,7 @@ class TriangularModel:
             # calculate private variances
             total_noise_variance = np.insert(non_target_noise_variance, 0, target_noise_variance)
             self.Psi = total_noise_variance - np.diag(self.L.T @ self.L)
-            self.Psi_t, self.Psi_nt = np.split(self.Psi, [0], axis=0)
+            self.Psi_t, self.Psi_nt = np.split(self.Psi, [1], axis=0)
 
         # noise correlations correspond to differences in tuning, with
         # increasing latent dimension corresponding to finer differences
@@ -357,7 +357,6 @@ class TriangularModel:
                 low=self.stim_kwargs['low'], high=self.stim_kwargs['high'],
                 size=(n_samples, self.M)
             )
-
         elif self.parameter_design == 'basis_functions':
             # draw stimulus and tuning features
             stimuli = random_state.uniform(low=0, high=1, size=n_samples)
@@ -487,7 +486,7 @@ class TriangularModel:
 
         if update:
             self.Psi_t = Psi_t
-            self.Psi[-1] = self.Psi_t
+            self.Psi[0] = self.Psi_t
             self.l_t = np.copy(l_t)
             self.L = np.copy(L)
             self.a = np.copy(a)
@@ -586,11 +585,41 @@ class TriangularModel:
         variance : np.ndarray, shape (N,)
             The variance of the target neuron.
         """
-        signal_variance = self.target_signal_variance(limits=limits)
-        latent_variance = np.sum(self.l_t**2, axis=0)
-        private_variance = self.Psi_t
-        variance = signal_variance + latent_variance + private_variance
+        tuning_weights = self.b + self.B @ self.a
+
+        if self.parameter_design == 'direct_response':
+            self.stim_var = self.calculate_variance(**self.stim_kwargs)
+            tuning_variance = self.stim_var * np.sum(tuning_weights**2)
+        elif self.parameter_design == 'basis_functions':
+            tuning_weights = self.b + self.B @ self.a
+            tuning_variance = utils.bf_sum_var(
+                weights=tuning_weights.ravel(),
+                centers=self.bf_centers,
+                scale=self.bf_scale,
+                limits=limits)
+
+        latent_variance = np.sum((self.l_t + self.L_nt @ self.a)**2)
+        private_variance = self.a.ravel()**2 @ self.Psi_nt + self.Psi_t
+        variance = tuning_variance + latent_variance + private_variance
         return variance
+
+    def get_masks(self):
+        """Get Boolean masks for the main triangular model parameters.
+
+        Returns
+        -------
+        a_mask, b_mask, B_mask : np.ndarray of bools
+            Masks for the coupling, target tuning, and non-target tuning
+            parameters.
+        """
+        a_mask = self.a.ravel() != 0
+        b_mask = self.b.ravel() != 0
+        B_mask = self.B != 0
+        return a_mask, b_mask, B_mask
+
+    def get_noise_cov(self):
+        """Gets the noise covariance matrix."""
+        return self.L.T @ self.L + np.diag(self.Psi)
 
     def plot_tuning_curves(self, neuron='all', fax=None, linewidth=1):
         """Plots the tuning curve(s) of the neurons in the triangular model.
@@ -839,6 +868,7 @@ class TriangularModel:
             noise_kwargs = {
                 'K': K,
                 'noise_structure': noise_structure,
+                'snr': snr,
                 'corr_back': corr_back,
                 'corr_cluster': corr_cluster
             }
