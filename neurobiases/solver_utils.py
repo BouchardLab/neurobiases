@@ -61,9 +61,9 @@ def marginal_log_likelihood_linear_tm(
     b = b * b_mask
 
     # split up into target and non-target components
-    L_nt, l_t = np.split(L, [N], axis=1)
+    l_t, L_nt = np.split(L, [1], axis=1)
     l_t = l_t.ravel()
-    Psi_nt, Psi_t = np.split(Psi, [N])
+    Psi_t, Psi_nt = np.split(Psi, [1])
     Psi_t = Psi_t.item()
 
     # mean and covariance matrices of the gaussian expression
@@ -71,8 +71,8 @@ def marginal_log_likelihood_linear_tm(
     sigma = np.zeros((N + 1, N + 1))
 
     # calculate mean of marginal
-    mu[:, 1:] = X @ B
     mu[:, 0] = X @ (b + B @ a)
+    mu[:, 1:] = X @ B
 
     # combine data matrices
     Y_all = np.concatenate((y, Y), axis=1)
@@ -91,7 +91,6 @@ def marginal_log_likelihood_linear_tm(
     residual = Y_all - mu
     ll = -D / 2. * np.linalg.slogdet(sigma)[1] \
         + -0.5 * np.sum(residual.T * np.linalg.solve(sigma, residual.T))
-
     return ll
 
 
