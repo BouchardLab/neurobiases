@@ -134,8 +134,7 @@ class TriangularModel:
             coupling_random_state.shuffle(a)
             # for tuning, we'll shuffle rows separately
             [tuning_random_state(B_all[:, idx]) for idx in range(self.N + 1)]
-            b = B_all[:, 0]
-            B = B_all[:, 1:]
+            b, B = np.split(B_all, [1], axis=1)
 
         elif self.parameter_design == 'direct_response':
             b = np.zeros((self.M, 1))
@@ -173,28 +172,10 @@ class TriangularModel:
                 else:
                     B[offset:offset + n_nonzero_tuning, neuron_idx] = tuning_curve
 
-            B_all = np.concatenate((B, b), axis=1)
+            B_all = np.concatenate((b, B), axis=1)
             # calculate tuning preferences
             self.tuning_prefs = np.argmax(B_all, axis=0)
-            # determine probabilities for neurons being coupled
-            target_tuning = self.tuning_prefs[-1]
-            non_target_tuning = self.tuning_prefs[:-1]
-            tuning_diff_decay = self.tuning_kwargs.get('tuning_diff_decay', 1)
-            probs = np.exp(-np.abs(non_target_tuning - target_tuning) / tuning_diff_decay)
-            probs /= probs.sum()
-            # determine coupled and non-coupled indices randomly
-            self.coupled_indices = np.sort(coupling_random_state.choice(
-                a=np.arange(self.N),
-                size=n_nonzero_coupling,
-                replace=False,
-                p=probs))
-            self.non_coupled_indices = np.setdiff1d(np.arange(self.N),
-                                                    self.coupled_indices)
-            # draw coupling parameters
-            a = np.zeros((self.N, 1))
-            a[self.coupled_indices, 0] = self.draw_parameters(
-                size=n_nonzero_coupling,
-                **self.coupling_kwargs)
+            a = self.generate_coupling_profile(self.tuning_prefs)
 
         elif self.parameter_design == 'basis_functions':
             # get basis function centers and width
@@ -202,9 +183,9 @@ class TriangularModel:
             self.bf_scale = self.tuning_kwargs.get('bf_scale', 0.25 / self.M)
 
             # get preferred tunings for each neuron
-            non_target_tuning = np.linspace(0, 1, self.N)
             target_tuning = self.tuning_kwargs.get('target_pref_tuning', 0.5)
-            all_tunings = np.append(non_target_tuning, target_tuning)
+            non_target_tuning = np.linspace(0, 1, self.N)
+            all_tunings = np.append(target_tuning, non_target_tuning)
 
             # calculate differences between preferred tuning and bf locations
             tuning_diffs = np.abs(np.subtract.outer(self.bf_centers, all_tunings))
@@ -220,8 +201,7 @@ class TriangularModel:
                 noise = tuning_random_state.normal(
                     loc=0.,
                     scale=self.tuning_kwargs.get('noise_scale', 0.25),
-                    size=(self.M, self.N + 1)
-                )
+                    size=(self.M, self.N + 1))
                 B_all += noise
             B_all = np.abs(B_all) * self.tuning_kwargs.get('scale', 1)
 
@@ -234,88 +214,71 @@ class TriangularModel:
                 # set parameters to zero
                 zero_indices = np.setdiff1d(np.arange(self.M), nonzero_indices)
                 B_all[zero_indices, idx] = 0
-            B, b = np.split(B_all, [self.N], axis=1)
+            b, B = np.split(B_all, [1], axis=1)
             # calculate preferred tuning for each neuron
             self.tuning_prefs = utils.calculate_pref_tuning(
                 B=B_all, bf_centers=self.bf_centers, bf_scale=self.bf_scale,
                 n_stimuli=10000, limits=(0, 1)
             )
+            # generate coupling parameters
+            a = self.generate_coupling_profile(self.tuning_prefs)
 
-            # decide which neurons are coupled according to their tuning
-            # distance with the target neuron
-            p = np.maximum(1 - np.abs(target_tuning - non_target_tuning), 0)
-            p = p / p.sum()
-            self.coupled_indices = np.sort(coupling_random_state.choice(
-                a=np.arange(self.N),
-                size=n_nonzero_coupling,
-                replace=False,
-                p=p))
-            self.non_coupled_indices = np.setdiff1d(np.arange(self.N),
-                                                    self.coupled_indices)
-            # draw coupling parameters
-            a = np.zeros((self.N, 1))
-            a[self.coupled_indices, 0] = self.draw_parameters(
-                size=n_nonzero_coupling,
-                **self.coupling_kwargs)
-
+        self.coupled_indices = np.argwhere(a.ravel()).ravel()
+        self.non_coupled_indices = np.setdiff1d(np.arange(self.N), self.coupled_indices)
         return a, b, B
 
     def generate_noise_structure(self):
         """Generates the noise covariance structure for the triangular model."""
-        noise_structure = self.noise_kwargs.get('noise_structure')
+        noise_structure = self.noise_kwargs['noise_structure']
         snr = self.noise_kwargs.get('snr', 3)
 
+        # noise correlations exist in specific clusters, with increasing
+        # latent dimension increasing the number of clusters
         if noise_structure == 'clusters':
             corr_cluster = self.noise_kwargs.get('corr_cluster', 0.1)
             corr_back = self.noise_kwargs.get('corr_back', 0.)
 
+            # calculate non-target signal and noise variances
             non_target_signal_variance = self.non_target_signal_variance()
             non_target_noise_variance = non_target_signal_variance / snr
-
-            # latent factors for non-target shared variability
-            L_nt = np.zeros((self.N, self.K + 1))
+            # latent factors non-target neurons; one extra factor for now
+            L_nt = np.zeros((self.K + 1, self.N))
             # one basis vector will provide the background noise correlation
-            L_nt[:, -1] = np.sqrt(corr_back * non_target_noise_variance)
-
+            L_nt[-1] = np.sqrt(corr_back * non_target_noise_variance)
             # split up the variances into the K clusters of correlated neurons
-            corr_clusters = np.array_split(np.sqrt(non_target_noise_variance), self.K)
-            indices = np.array_split(np.arange(self.N), self.K)
-
+            variance_clusters = np.array_split(np.sqrt(non_target_noise_variance), self.K)
+            idx_clusters = np.array_split(np.arange(self.N), self.K)
             # iterate over the K clusters, each of which will set a latent factor
-            for lf_idx, group in enumerate(zip(corr_clusters, indices)):
-                # get curretn cluster
-                cluster_vars, cluster_idx = group
+            for lf_idx, (variances, idxs) in enumerate(zip(variance_clusters, idx_clusters)):
                 # place the correct values in the latent factor
-                L_nt[cluster_idx, lf_idx] = cluster_vars * np.sqrt(
-                    corr_cluster - corr_back
-                )
-
-            non_target_noise_cov = np.dot(L_nt, L_nt.T)
-            np.fill_diagonal(non_target_noise_cov, non_target_noise_variance)
-            self.L_nt = L_nt.T
-            self.Psi_nt = np.diag(non_target_noise_cov - L_nt @ L_nt.T)
+                L_nt[lf_idx, idxs] = variances * np.sqrt(corr_cluster - corr_back)
+            # store these for now so that we can calculate target signal var
+            self.L_nt = np.copy(L_nt)
+            self.Psi_nt = non_target_noise_variance - np.diag(L_nt.T @ L_nt)
 
             # calculate latent factors and private variance for target neuron
             target_signal_variance = self.target_signal_variance()
             target_noise_variance = target_signal_variance / snr
-
             # place the target neuron in the middle group
             target_group_idx = int(np.ceil(self.K / 2 - 1))
-            # the latent basis vector from before needs to be appended to account
-            # for the target neuron
-            self.l_t = np.zeros((self.K + 1, 1))
-            self.l_t[target_group_idx] = \
+            # calculate target latent factor
+            l_t = np.zeros((self.K + 1, 1))
+            l_t[target_group_idx] = \
                 np.sqrt(target_noise_variance) * np.sqrt(corr_cluster - corr_back)
             # add on the background noise correlation term
-            self.l_t[-1] = np.sqrt(corr_back * target_noise_variance)
-            self.Psi_t = target_noise_variance - (self.l_t.T @ self.l_t).item()
+            l_t[-1] = np.sqrt(corr_back * target_noise_variance)
 
             # combine latent factors and private variances
-            self.L = np.concatenate((self.L_nt, self.l_t), axis=1)
-            self.L = utils.symmetric_low_rank_approx(np.dot(self.L.T, self.L), self.K).T
-            self.L_nt, self.l_t = np.split(self.L, [self.N], axis=1)
-            self.Psi = np.append(self.Psi_nt, self.Psi_t)
+            self.L = np.concatenate((l_t, L_nt), axis=1)
+            self.L = utils.symmetric_low_rank_approx(self.L.T @ self.L, self.K).T
+            self.l_t, self.L_nt = np.split(self.L, [1], axis=1)
+            # calculate private variances
+            total_noise_variance = np.insert(non_target_noise_variance, 0, target_noise_variance)
+            self.Psi = total_noise_variance - np.diag(self.L.T @ self.L)
+            self.Psi_t, self.Psi_nt = np.split(self.Psi, [0], axis=0)
 
+        # noise correlations correspond to differences in tuning, with
+        # increasing latent dimension corresponding to finer differences
         elif noise_structure == 'falloff':
             corr_max = self.noise_kwargs.get('corr_max', 0.2)
             corr_min = self.noise_kwargs.get('corr_min', -0.05)
@@ -434,6 +397,44 @@ class TriangularModel:
         else:
             return X, Y, y
 
+    def generate_coupling_profile(self, tuning_prefs):
+        """Generates a coupling profile according to a distribution of preferred
+        tunings for the neural population.
+
+        Parameters
+        ----------
+        tuning_prefs : np.ndarray, shape (N+1,)
+            The preferred tunings for the neurons in the population. The first
+            index denotes the preferred tuning for the target neuron, the
+            remaining N indices denote it for the remaining neurons.
+
+        Returns
+        -------
+        a : np.ndarray, shape (N, 1)
+            The coupling parameters.
+        """
+        coupling_random_state = self.coupling_kwargs['random_state']
+        n_nonzero_coupling = int((1 - self.coupling_kwargs['sparsity']) * self.N)
+        # get preferred tunings
+        target_tuning, non_target_tuning = np.split(tuning_prefs, [1], axis=0)
+        # how quickly probability decays with tuning difference
+        tuning_diff_decay = self.tuning_kwargs.get('tuning_diff_decay', 1)
+        # calculate and normalize probability of selecting tuning parameter
+        probs = np.exp(-np.abs(non_target_tuning - target_tuning) / tuning_diff_decay)
+        probs /= probs.sum()
+        # determine coupled and non-coupled indices randomly
+        coupled_indices = np.sort(coupling_random_state.choice(
+            a=np.arange(self.N),
+            size=n_nonzero_coupling,
+            replace=False,
+            p=probs))
+        # draw coupling parameters
+        a = np.zeros((self.N, 1))
+        a[coupled_indices, 0] = self.draw_parameters(
+            size=n_nonzero_coupling,
+            **self.coupling_kwargs)
+        return a
+
     def identifiability_transform(self, delta, update=True):
         """Performs an identifiability transform on the parameters in the
         model.
@@ -478,11 +479,11 @@ class TriangularModel:
         # private variability
         Psi_t = (Psi_t + Psi_t_correction).item()
         Psi = np.copy(self.Psi)
-        Psi[-1] = Psi_t
+        Psi[0] = Psi_t
         # latent factors
         l_t = (self.l_t.ravel() + delta.ravel())[..., np.newaxis]
         L = np.copy(self.L)
-        L[:, -1] = l_t.ravel()
+        L[:, 0] = l_t.ravel()
 
         if update:
             self.Psi_t = Psi_t
@@ -747,7 +748,7 @@ class TriangularModel:
             # add noise, with scale 1/10 that of the peak value
             noise = random_state.normal(
                 loc=0,
-                scale=kwargs['peak'] / 10.,
+                scale=kwargs.get('noise_scale', kwargs['peak'] / 10.),
                 size=size)
             parameters = np.abs(parameters + noise)
 
@@ -793,25 +794,39 @@ class TriangularModel:
 
     @staticmethod
     def generate_kwargs(
-        M=50, tuning_sparsity=0.75, tuning_distribution='noisy_hann_window',
-        tuning_peak=150, tuning_bound_frac=0.25, tuning_diff_decay=2,
-        tuning_random_state=2332, N=20, coupling_sparsity=0.5,
-        coupling_distribution='symmetric_lognormal', coupling_loc=-1,
-        coupling_scale=0.5, coupling_random_state=2332, K=2, snr=3,
-        noise_structure='clusters', corr_cluster=0.2, corr_back=0., corr_max=0.3,
-        corr_min=0.0, L_corr=1, stim_distribution='uniform', stim_low=0, stim_high=1
+        parameter_design='direct_response', M=50, tuning_sparsity=0.75,
+        tuning_noise_scale=None, tuning_distribution='noisy_hann_window',
+        tuning_peak=150, tuning_bound_frac=0.25, tuning_diff_decay=1.,
+        tuning_random_state=2332, tuning_bf_scale=None, target_pref_tuning=0.5,
+        tuning_add_noise=True, tuning_overall_scale=1., N=20,
+        coupling_sparsity=0.5, coupling_distribution='symmetric_lognormal',
+        coupling_loc=-1, coupling_scale=0.5, coupling_random_state=2332, K=2,
+        snr=3, noise_structure='clusters', corr_cluster=0.2, corr_back=0.,
+        corr_max=0.3, corr_min=0.0, L_corr=1, stim_distribution='uniform',
+        stim_low=0, stim_high=1
     ):
         """Generates a set of keyword argument dictionaries for the piecewise
         formulated triangular model."""
         tuning_kwargs = {
             'M': M,
             'sparsity': tuning_sparsity,
-            'distribution': tuning_distribution,
-            'peak': tuning_peak,
-            'bound_frac': tuning_bound_frac,
             'tuning_diff_decay': tuning_diff_decay,
             'random_state': tuning_random_state,
         }
+        if tuning_noise_scale is not None:
+            tuning_kwargs['noise_scale'] = tuning_noise_scale
+
+        if parameter_design == 'direct_response':
+            tuning_kwargs['distribution'] = tuning_distribution
+            tuning_kwargs['peak'] = tuning_peak
+            tuning_kwargs['bound_frac'] = tuning_bound_frac
+        elif parameter_design == 'basis_functions':
+            tuning_kwargs['target_pref_tuning'] = target_pref_tuning
+            tuning_kwargs['add_noise'] = tuning_add_noise
+            tuning_kwargs['overall_scale'] = tuning_overall_scale
+            if tuning_bf_scale is not None:
+                tuning_kwargs['bf_scale'] = tuning_bf_scale
+
         coupling_kwargs = {
             'N': N,
             'sparsity': coupling_sparsity,
