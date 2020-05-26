@@ -4,7 +4,7 @@ from neurobiases import TriangularModel
 from numpy.testing import assert_allclose
 
 
-def generate_model():
+def generate_direct_response_model():
     """Generates a triangular model."""
     tuning_kwargs = {
         'M': 10,
@@ -31,7 +31,7 @@ def generate_model():
     }
     tm = TriangularModel(
         model='linear',
-        parameter_design='basis_functions',
+        parameter_design='direct_response',
         tuning_kwargs=tuning_kwargs,
         coupling_kwargs=coupling_kwargs,
         noise_kwargs=noise_kwargs)

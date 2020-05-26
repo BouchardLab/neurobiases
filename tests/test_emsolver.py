@@ -7,7 +7,7 @@ from numpy.testing import assert_allclose
 def load_tm():
     """Loads a random triangular model."""
     tuning_kwargs, coupling_kwargs, noise_kwargs, stim_kwargs = \
-        TriangularModel.generate_piecewise_kwargs(
+        TriangularModel.generate_kwargs(
             M=50, N=23, K=1, corr_cluster=0.3, corr_back=0.1,
             tuning_sparsity=0.6, coupling_sparsity=0.5,
             tuning_random_state=233332, coupling_random_state=2)
