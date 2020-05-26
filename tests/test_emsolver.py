@@ -1,33 +1,55 @@
 import numpy as np
+import pytest
 
-from neurobiases import TriangularModel, EMSolver
-from numpy.testing import assert_allclose
+from neurobiases import EMSolver
+from numpy.testing import assert_allclose, assert_array_equal
 
-
-def load_tm():
-    """Loads a random triangular model."""
-    tuning_kwargs, coupling_kwargs, noise_kwargs, stim_kwargs = \
-        TriangularModel.generate_kwargs(
-            M=50, N=23, K=1, corr_cluster=0.3, corr_back=0.1,
-            tuning_sparsity=0.6, coupling_sparsity=0.5,
-            tuning_random_state=233332, coupling_random_state=2)
-    tm = TriangularModel(
-        model='linear',
-        parameter_design='piecewise',
-        tuning_kwargs=tuning_kwargs,
-        coupling_kwargs=coupling_kwargs,
-        noise_kwargs=noise_kwargs,
-        stim_kwargs=stim_kwargs)
-    return tm
+from utils import (generate_bf_cluster_model,
+                   generate_dr_cluster_model)
 
 
 def test_marginal_likelihood():
     """Tests the marginal likelihood for the linear TM in a simple case."""
-    tm = load_tm()
-    X, Y, y = tm.generate_samples(n_samples=1000)
-    solver = EMSolver(X, Y, y, K=1)
-    solver.set_params(L=np.zeros_like(solver.L))
-    # test the marginal likelihood
-    empirical_likelihood = solver.marginal_log_likelihood()
-    true_likelihood = -0.5 * ((y.T @ y).item() + np.trace(Y @ Y.T))
-    assert_allclose(true_likelihood, empirical_likelihood)
+    tm1 = generate_bf_cluster_model()
+    tm2 = generate_dr_cluster_model()
+
+    for tm in [tm1, tm2]:
+        X, Y, y = tm.generate_samples(n_samples=1000)
+        solver = EMSolver(X, Y, y, K=1)
+        solver.set_params(L=np.zeros_like(solver.L))
+        # test the marginal likelihood
+        empirical_likelihood = solver.marginal_log_likelihood()
+        true_likelihood = -0.5 * ((y.T @ y).item() + np.trace(Y @ Y.T))
+        assert_allclose(true_likelihood, empirical_likelihood)
+
+
+@pytest.mark.slow
+def test_em_update():
+    """Tests that the EM optimization always increases the marginal likelihood."""
+    K = 1
+    tm1 = generate_bf_cluster_model(K=K)
+    tm2 = generate_dr_cluster_model(K=K)
+
+    for tm in [tm1, tm2]:
+        X, Y, y = tm.generate_samples(n_samples=100)
+        solver = EMSolver(X=X, Y=Y, y=y, K=K, max_iter=50, tol=0)
+        mlls = solver.fit_em(mll_curve=True)
+        assert mlls.size == solver.max_iter
+        assert np.all(np.ediff1d(mlls) > 0)
+
+
+@pytest.mark.slow
+def test_em_mask():
+    """Tests that, when provided a mask, EMSolver maintains the selection
+    profiles during fitting."""
+    K = 2
+    tm = generate_bf_cluster_model(K=K)
+
+    X, Y, y = tm.generate_samples(n_samples=100)
+    a_mask, b_mask, B_mask = tm.get_masks()
+    solver = EMSolver(X=X, Y=Y, y=y, K=K, max_iter=10, tol=0,
+                      a_mask=a_mask, b_mask=b_mask, B_mask=B_mask)
+    solver.fit_em()
+    assert_array_equal(a_mask, solver.a.ravel() != 0)
+    assert_array_equal(b_mask, solver.b.ravel() != 0)
+    assert_array_equal(B_mask, solver.B != 0)
