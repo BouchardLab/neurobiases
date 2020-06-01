@@ -1,6 +1,8 @@
 import numpy as np
 import torch
 
+from .lbfgs import fmin_lbfgs
+from neurobiases import plot
 from neurobiases import solver_utils as utils
 from scipy.optimize import minimize
 from sklearn.utils import check_random_state
@@ -47,7 +49,8 @@ class EMSolver():
     def __init__(
         self, X, Y, y, K, a_mask=None, b_mask=None, B_mask=None,
         B=None, L_nt=None, L=None, log_Psi_nt=None, log_Psi=None,
-        max_iter=1000, tol=1e-4, random_state=None
+        solver='scipy_lbfgs', max_iter=1000, tol=1e-4, c_tuning=1., c_coupling=1.,
+        random_state=None
     ):
         # tuning and coupling design matrices
         self.X = X
@@ -58,8 +61,11 @@ class EMSolver():
         self.K = K
 
         # optimization parameters
+        self.solver = solver
         self.max_iter = max_iter
         self.tol = tol
+        self.c_coupling = c_coupling
+        self.c_tuning = c_tuning
         self.random_state = check_random_state(random_state)
 
         # initialize parameter estimates
@@ -458,20 +464,60 @@ class EMSolver():
             callback = None
 
         # run m-step minimization
-        optimize = minimize(
-            self.f_df_em, x0=params,
-            method='L-BFGS-B',
-            args=(self.X, self.Y, self.y, self.a_mask, self.b_mask, self.B_mask,
-                  self.train_B, self.train_L, self.train_L_nt, self.train_log_Psi_nt,
-                  self.train_log_Psi, mu, zz, sigma),
-            callback=callback,
-            jac=True)
+        if self.solver == 'scipy_lbfgs':
+            optimize = minimize(
+                self.f_df_em, x0=params,
+                method='L-BFGS-B',
+                args=(self.X, self.Y, self.y, self.a_mask, self.b_mask, self.B_mask,
+                      self.train_B, self.train_L_nt, self.train_L, self.train_log_Psi_nt,
+                      self.train_log_Psi, mu, zz, sigma, 1.),
+                callback=callback,
+                jac=True)
+            # extract optimized parameters
+            params = optimize.x
+        elif self.solver == 'ow_lbfgs':
+            if self.c_coupling != 0 and self.c_tuning != 0:
+                orthantwise_start = 0
+                orthantwise_end = self.N + self.M + self.N * self.M
+                tuning_to_coupling_ratio = float(self.c_tuning) / self.c_coupling
+                c = self.c_coupling
+            elif self.c_tuning == 0 and self.c_coupling != 0:
+                orthantwise_start = 0
+                orthantwise_end = self.N
+                tuning_to_coupling_ratio = 1.
+                c = self.c_coupling
+            elif self.c_coupling == 0 and self.c_tuning != 0:
+                orthantwise_start = self.N
+                orthantwise_end = self.N + self.M + self.N * self.M
+                tuning_to_coupling_ratio = 1.
+                c = self.c_tuning
+            else:
+                orthantwise_start = 0
+                orthantwise_end = -1
+                c = 0
+                tuning_to_coupling_ratio = 1.
+            print('tuning', self.c_tuning, 'coupling', self.c_coupling, 'ratio', tuning_to_coupling_ratio)
+            params = fmin_lbfgs(
+                self.f_df_em_owlbfgs, x0=params,
+                args=(self.X, self.Y, self.y, self.a_mask, self.b_mask, self.B_mask,
+                      self.train_B, self.train_L_nt, self.train_L, self.train_log_Psi_nt,
+                      self.train_log_Psi, mu, zz, sigma, tuning_to_coupling_ratio),
+                orthantwise_c=c,
+                orthantwise_start=orthantwise_start,
+                orthantwise_end=orthantwise_end)
+            a, b, B, log_Psi, L = self.split_params(params)
+            b = b / tuning_to_coupling_ratio
+            B = B / tuning_to_coupling_ratio
+            params = np.concatenate((a.ravel(),
+                                     b.ravel(),
+                                     B.ravel(),
+                                     log_Psi.ravel(),
+                                     L.ravel()))
 
-        # extract optimized parameters
-        params = optimize.x
         return params
 
-    def fit_em(self, verbose=False, mstep_verbose=False, mll_curve=False):
+    def fit_em(self, verbose=False, mstep_verbose=False, mll_curve=False,
+               sparsity_verbose=False):
         """Fit the triangular model parameters using the EM algorithm.
 
         Parameters
@@ -522,6 +568,11 @@ class EMSolver():
             if verbose:
                 print('Iteration %s, del=%0.9f, mll=%f' % (iteration, del_ml,
                                                            mlls[iteration]))
+                if sparsity_verbose:
+                    coupling_sr = np.count_nonzero(self.a) / self.N
+                    tuning_sr = np.count_nonzero(self.b) / self.M
+                    sparsity_statement = 'Coupling SR = %0.3f, Tuning SR = %0.3f' % (coupling_sr, tuning_sr)
+                    print(sparsity_statement)
 
         if mll_curve:
             return mlls[:iteration]
@@ -690,113 +741,74 @@ class EMSolver():
         neurons."""
         return np.exp(self.log_Psi) / np.diag(np.dot(self.L.T, self.L))
 
-    def compare_tc_fits(self, lsem, fax=None, color='gray'):
-        """Plot a comparison between the fitted and true parameters."""
-        import matplotlib.pyplot as plt
+    def plot_tc_fits(self, tm, fax=None, color='black', edgecolor='white'):
+        """Scatters estimated tuning and coupling fits against ground truth
+        fits.
 
-        if fax is None:
-            fig, axes = plt.subplots(1, 2, figsize=(8, 4))
-        else:
-            fig, axes = fax
+        Parameters
+        ----------
+        tm : TriangularModel object
+            The TriangularModel with the ground truth parameters.
+        fax : mpl.figure and mpl.axes
+            The matplotlib axes objects. If None, new objects are created.
+        color : string
+            The color of the points.
+        edgecolor : string
+            The edgecolor of the points.
 
-        a = lsem.A
-        b = lsem.Bi
-
-        # plot tuning parameters
-        axes[0].scatter(b.ravel(), self.b.ravel(), color=color, s=50)
-        axes[0].set_xlim([1.5 * np.min([b, self.b]), 1.25 * np.max([b, self.b])])
-        axes[0].set_ylim(axes[0].get_xlim())
-        axes[0].plot(axes[0].get_xlim(), axes[0].get_ylim(), color='k')
-
-        # plot coupling parameters
-        axes[1].scatter(a.ravel(), self.a.ravel(), color=color, s=50)
-        axes[1].set_xlim([1.5 * np.min([a, self.a]), 1.5 * np.max([a, self.a])])
-        axes[1].set_ylim(axes[1].get_xlim())
-        axes[1].plot(axes[1].get_xlim(), axes[1].get_ylim(), color='k')
-
-        for ax in axes.ravel():
-            ax.set_aspect('equal')
-            ax.set_xlabel(r'\textbf{True}', fontsize=18)
-            ax.set_ylabel(r'\textbf{Estimated}', fontsize=18)
-
-        axes[0].set_title(r'\textbf{Tuning Parameters}', fontsize=20)
-        axes[1].set_title(r'\textbf{Coupling Parameters}', fontsize=20)
-
-        plt.tight_layout()
-
+        Returns
+        -------
+        fig, axes : mpl.figure and mpl.axes
+            The matplotlib axes objects, with fits plotted on the axes.
+        """
+        # get true/estimated fits
+        a_hat = self.a.ravel()
+        a_true = tm.a.ravel()
+        b_hat = self.b.ravel()
+        b_true = tm.b.ravel()
+        # plot fit comparison
+        fig, axes = plot.plot_tc_fits(
+            a_hat=a_hat, a_true=a_true, b_hat=b_hat, b_true=b_true,
+            fax=fax, color=color, edgecolor=edgecolor
+        )
         return fig, axes
 
-    def compare_fits(self, lsem, fax=None, color='gray'):
-        """Plot a comparison between the fitted and true parameters."""
-        import matplotlib.pyplot as plt
+    def compare_fits(self, tm, fax=None, color='black', edgecolor='white'):
+        """Scatters a comparison between estimated/true parameters, across
+        all parameters in the triangular model.
 
-        if fax is None:
-            fig, axes = plt.subplots(2, 3, figsize=(12, 8))
-        else:
-            fig, axes = fax
+        Parameters
+        ----------
+        tm : TriangularModel object
+            The TriangularModel with the ground truth parameters.
+        fax : mpl.figure and mpl.axes
+            The matplotlib axes objects. If None, new objects are created.
+        color : string
+            The color of the points.
+        edgecolor : string
+            The edgecolor of the points.
 
-        a = lsem.A
-        b = lsem.Bi
-        B = lsem.Bj
-        log_Psi = np.log(np.diag(lsem._Psi))
-        LL = np.dot(lsem._L, lsem._L.T)[np.tril_indices(self.N + 1)]
-        LL_hat = np.dot(self.L.T, self.L)[np.tril_indices(self.N + 1)]
+        Returns
+        -------
+        fig, axes : mpl.figure and mpl.axes
+            The matplotlib axes objects, with fits plotted on the axes.
+        """
+        a_hat = self.a.ravel()
+        a_true = tm.a.ravel()
+        b_hat = self.b.ravel()
+        b_true = tm.b.ravel()
+        B_hat = self.B
+        B_true = tm.B
+        L_hat = self.L
+        L_true = tm.L
+        Psi_hat = np.exp(self.log_Psi)
+        Psi_true = tm.Psi
 
-        # plot tuning parameters
-        axes[0, 0].scatter(b.ravel(), self.b.ravel(), color=color, s=50)
-        axes[0, 0].set_xlim([1.5 * np.min([b, self.b]), 1.25 * np.max([b, self.b])])
-        axes[0, 0].set_ylim(axes[0, 0].get_xlim())
-        axes[0, 0].plot(axes[0, 0].get_xlim(), axes[0, 0].get_ylim(), color='k')
-
-        # plot coupling parameters
-        axes[0, 1].scatter(a.ravel(), self.a.ravel(), color=color, s=50)
-        axes[0, 1].set_xlim([1.5 * np.min([a, self.a]), 1.5 * np.max([a, self.a])])
-        axes[0, 1].set_ylim(axes[0, 1].get_xlim())
-        axes[0, 1].plot(axes[0, 1].get_xlim(), axes[0, 1].get_ylim(), color='k')
-
-        # plot non-target tuning parameters
-        axes[1, 0].scatter(B.ravel(), self.B.ravel(), color=color)
-        axes[1, 0].set_xlim([0.75 * np.min([B, self.B]), 1.25 * np.max([B, self.B])])
-        axes[1, 0].set_ylim(axes[1, 0].get_xlim())
-        axes[1, 0].plot(axes[1, 0].get_xlim(), axes[1, 0].get_ylim(), color='k')
-
-        # plot private variances
-        axes[1, 1].scatter(log_Psi, self.log_Psi.ravel(), color=color)
-        axes[1, 1].set_xlim([0.75 * np.min([log_Psi, self.log_Psi.ravel()]),
-                             1.25 * np.max([log_Psi, self.log_Psi.ravel()])])
-        axes[1, 1].set_ylim(axes[1, 1].get_xlim())
-        axes[1, 1].plot(axes[1, 1].get_xlim(), axes[1, 1].get_ylim(), color='k')
-
-        # plot shared variability
-        axes[0, 2].scatter(LL, LL_hat, color=color)
-        axes[0, 2].set_xlim([np.min([LL, LL_hat]),
-                             1.1 * np.max([LL, LL_hat])])
-        axes[0, 2].set_ylim(axes[0, 2].get_xlim())
-        axes[0, 2].plot(axes[0, 2].get_xlim(), axes[0, 2].get_xlim(), color='k')
-
-        cov = np.diag(np.exp(log_Psi)) + np.dot(lsem._L, lsem._L.T)
-        inv_var = (1. / np.diag(cov))**(0.5)
-        corr = (cov * np.outer(inv_var, inv_var))[np.tril_indices(self.N + 1, k=-1)]
-        corr_hat = self.create_corr()[np.tril_indices(self.N + 1, k=-1)]
-        axes[1, 2].scatter(corr, corr_hat, color=color)
-        axes[1, 2].set_xlim([-1, 1])
-        axes[1, 2].set_ylim([-1, 1])
-        axes[1, 2].plot(axes[1, 2].get_xlim(), axes[1, 2].get_xlim(), color='k')
-
-        for ax in axes.ravel():
-            ax.set_aspect('equal')
-            ax.set_xlabel(r'\textbf{True}', fontsize=18)
-            ax.set_ylabel(r'\textbf{Estimated}', fontsize=18)
-
-        axes[0, 0].set_title(r'\textbf{Tuning Parameters}', fontsize=20)
-        axes[0, 1].set_title(r'\textbf{Coupling Parameters}', fontsize=20)
-        axes[1, 0].set_title(r'\textbf{Non-target Tuning}', fontsize=20)
-        axes[1, 1].set_title(r'\textbf{Private Variances}', fontsize=20)
-        axes[0, 2].set_title(r'\textbf{Shared (Co)-variances}', fontsize=20)
-        axes[1, 2].set_title(r'\textbf{Shared Correlations}', fontsize=20)
-
-        plt.tight_layout()
-
+        fig, axes = plot.plot_tm_fits(
+            a_hat=a_hat, a_true=a_true, b_hat=b_hat, b_true=b_true, B_hat=B_hat,
+            B_true=B_true, L_hat=L_hat, L_true=L_true, Psi_hat=Psi_hat,
+            Psi_true=Psi_true, fax=fax, color=color, edgecolor=edgecolor
+        )
         return fig, axes
 
     @staticmethod
@@ -807,13 +819,10 @@ class EMSolver():
         ----------
         tparams : torch.tensor
             Torch tensor containing all the parameters concatenated together.
-
         N : int
             The number of coupling parameters.
-
         M : int
             The number of tuning parameters.
-
         K : int
             The number of latent factors.
 
@@ -821,16 +830,12 @@ class EMSolver():
         -------
         a : torch.tensor, shape (N, 1)
             The coupling parameters.
-
         b : torch.tensor, shape (M, 1)
             The tuning parameters.
-
         B : torch.tensor, shape (M, N)
             The non-target tuning parameters.
-
         log_Psi : torch.tensor, shape (N + 1,)
             The private variances.
-
         L : torch.tensor, shape (K, N+1)
             The latent factors.
         """
@@ -839,140 +844,7 @@ class EMSolver():
         B = tparams[(N + M):(N + M + N * M)].reshape(M, N)
         log_Psi = tparams[(N + M + N * M):(N + M + N * M + N + 1)].reshape(N + 1, 1)
         L = tparams[(N + M + N * M + N + 1):].reshape(K, N + 1)
-
         return a, b, B, log_Psi, L
-
-    @staticmethod
-    def f_df_em(params, X, Y, y, a_mask, b_mask, B_mask, train_B, train_L_nt,
-                train_L, train_log_Psi_nt, train_log_Psi, mu, zz, sigma):
-        """Helper function for the M-step in the EM procedure. Calculates the
-        expected complete log-likelihood and gradients with respect to all
-        parameters.
-
-        Parameters
-        ----------
-        X : np.ndarray, shape (D, M)
-            Design matrix for tuning features.
-
-        Y : np.ndarray, shape (D, N)
-            Design matrix for coupling features.
-
-        y : np.ndarray, shape (D, 1)
-            Neural response vector.
-
-        a_mask : np.ndarray, shape (N, 1)
-            Mask for coupling features.
-
-        b_mask : nd-array, shape (M, 1)
-            Mask for tuning features.
-
-        B_mask : nd-array, shape (N, M)
-            Mask for non-target neuron tuning features.
-
-        train_B : bool
-            If True, non-target tuning parameters will be trained.
-
-        train_L_nt : bool
-            If True, non-target latent factors will be trained.
-
-        train_L : bool
-            If True, latent factors will be trained. Takes precedence over
-            train_L_nt.
-
-        train_log_Psi_nt : bool
-            If True, non-target private variances will be trained.
-
-        train_log_Psi : bool
-            If True, private variances will be trained. Takes precedence over
-            train_log_Psi_nt.
-
-        mu : np.ndarray, shape (D, K)
-            The expected value of the latent state across samples.
-
-        zz : np.ndarray, shape (D, K, K)
-            The expected second-order statistics of the latent state across
-            samples.
-
-        sigma : np.ndarray, shape (K, K)
-            The covariance of the latent states.
-
-        Returns
-        -------
-        loss : float
-            The value of the loss function, the expected complete log-likelihood.
-
-        grad : np.ndarray
-            The gradient of the loss with respect to all parameters. Any
-            variables whose training flag was set to False will have corresponding
-            gradients set equal to zero.
-        """
-        # extract dimensions
-        D, M = X.shape
-        N = Y.shape[1]
-        K = mu.shape[1]
-        # turn parameters into torch tensors
-        tparams = torch.tensor(params, requires_grad=True)
-        a, b, B, log_Psi, L = EMSolver.split_tparams(tparams, N, M, K)
-        # split up terms into target/non-target components
-        Psi = torch.exp(log_Psi)
-        Psi_nt = Psi[1:]
-        l_t = L[:, 0].reshape(K, 1)
-        L_nt = L[:, 1:]
-
-        # turn data and E-step variables into torch tensors
-        X = torch.tensor(X)
-        Y = torch.tensor(Y)
-        y = torch.tensor(y)
-        mu = torch.tensor(mu)
-        zz = torch.tensor(zz)
-        sigma = torch.tensor(sigma)
-
-        # useful terms for the expected complete log-likelihood
-        y_residual = y - torch.mm(X, b) - torch.mm(Y, a)
-        Y_residual = Y - torch.mm(X, B)
-        muL = torch.mm(mu, L_nt)
-
-        # calculate expected complete log-likelihood, term by term
-        # see paper for derivation
-        term1 = torch.sum(log_Psi)
-        term2 = torch.mean(y_residual**2 / Psi[0])
-        term3 = torch.mean((-2. / Psi[0]) * y_residual * torch.mm(mu, l_t))
-        term4 = torch.mean(
-            torch.matmul(torch.transpose(torch.matmul(zz, l_t), 1, 2), l_t)) / Psi[0]
-        term5 = torch.sum(Y_residual**2 / Psi_nt.t()) / D
-        term6 = -2 * torch.sum(Y_residual * muL / Psi_nt.t()) / D
-        term7a = torch.trace(torch.chain_matmul(L_nt, L_nt.t() / Psi_nt, sigma))
-        term7b = torch.sum(muL**2 / Psi_nt.t()) / D
-
-        # calculate loss and perform autograd
-        loss = term1 + term2 + term3 + term4 + term5 + term6 + term7a + term7b
-        loss.backward()
-        # extract gradient
-        grad = tparams.grad.detach().numpy()
-
-        # apply masks to the gradient
-        grad[:N] *= a_mask.ravel()
-        grad[N:(N + M)] *= b_mask.ravel()
-
-        # if we're training non-target tuning parameters, apply selection mask
-        if train_B:
-            grad[(N + M):(N + M + N * M)] *= B_mask.ravel()
-        else:
-            grad[(N + M):(N + M + N * M)] = 0
-
-        # mask out gradients for parameters not being trained
-        if not train_log_Psi_nt:
-            grad[(N + M + N * M + 1):(N + M + N * M + N + 1)] = 0
-        if not train_log_Psi:
-            grad[(N + M + N * M):(N + M + N * M + N + 1)] = 0
-        if not train_L_nt:
-            mask = np.zeros(grad[(N + M + N * M + N + 1):].size)
-            mask[0::(N + 1)] = np.ones(K)
-            grad[(N + M + N * M + N + 1):] *= mask
-        if not train_L:
-            grad[(N + M + N * M + N + 1):] = 0
-
-        return loss.detach().numpy(), grad
 
     @staticmethod
     def f_df_ml(
@@ -1100,6 +972,135 @@ class EMSolver():
             grad[(N + M + N * M + N + 1):] *= mask
 
         return loss, grad
+
+    @staticmethod
+    def f_df_em(params, X, Y, y, a_mask, b_mask, B_mask, train_B, train_L_nt,
+                train_L, train_log_Psi_nt, train_log_Psi, mu, zz, sigma,
+                tuning_to_coupling_ratio):
+        """Helper function for the M-step in the EM procedure. Calculates the
+        expected complete log-likelihood and gradients with respect to all
+        parameters.
+
+        Parameters
+        ----------
+        X : np.ndarray, shape (D, M)
+            Design matrix for tuning features.
+        Y : np.ndarray, shape (D, N)
+            Design matrix for coupling features.
+        y : np.ndarray, shape (D, 1)
+            Neural response vector.
+        a_mask : np.ndarray, shape (N, 1)
+            Mask for coupling features.
+        b_mask : nd-array, shape (M, 1)
+            Mask for tuning features.
+        B_mask : nd-array, shape (N, M)
+            Mask for non-target neuron tuning features.
+        train_B : bool
+            If True, non-target tuning parameters will be trained.
+        train_L_nt : bool
+            If True, non-target latent factors will be trained.
+        train_L : bool
+            If True, latent factors will be trained. Takes precedence over
+            train_L_nt.
+        train_log_Psi_nt : bool
+            If True, non-target private variances will be trained.
+        train_log_Psi : bool
+            If True, private variances will be trained. Takes precedence over
+            train_log_Psi_nt.
+        mu : np.ndarray, shape (D, K)
+            The expected value of the latent state across samples.
+        zz : np.ndarray, shape (D, K, K)
+            The expected second-order statistics of the latent state across
+            samples.
+        sigma : np.ndarray, shape (K, K)
+            The covariance of the latent states.
+
+        Returns
+        -------
+        loss : float
+            The value of the loss function, the expected complete log-likelihood.
+        grad : np.ndarray
+            The gradient of the loss with respect to all parameters. Any
+            variables whose training flag was set to False will have corresponding
+            gradients set equal to zero.
+        """
+        # extract dimensions
+        D, M = X.shape
+        N = Y.shape[1]
+        K = mu.shape[1]
+        # turn parameters into torch tensors
+        tparams = torch.tensor(params, requires_grad=True)
+        a, b, B, log_Psi, L = EMSolver.split_tparams(tparams, N, M, K)
+        # apply rescaling
+        b = b / tuning_to_coupling_ratio
+        B = B / tuning_to_coupling_ratio
+        # split up terms into target/non-target components
+        Psi = torch.exp(log_Psi)
+        Psi_nt = Psi[1:]
+        l_t = L[:, 0].reshape(K, 1)
+        L_nt = L[:, 1:]
+
+        # turn data and E-step variables into torch tensors
+        X = torch.tensor(X)
+        Y = torch.tensor(Y)
+        y = torch.tensor(y)
+        mu = torch.tensor(mu)
+        zz = torch.tensor(zz)
+        sigma = torch.tensor(sigma)
+
+        # useful terms for the expected complete log-likelihood
+        y_residual = y - torch.mm(X, b) - torch.mm(Y, a)
+        Y_residual = Y - torch.mm(X, B)
+        muL = torch.mm(mu, L_nt)
+
+        # calculate expected complete log-likelihood, term by term
+        # see paper for derivation
+        term1 = torch.sum(log_Psi)
+        term2 = torch.mean(y_residual**2 / Psi[0])
+        term3 = torch.mean((-2. / Psi[0]) * y_residual * torch.mm(mu, l_t))
+        term4 = torch.mean(
+            torch.matmul(torch.transpose(torch.matmul(zz, l_t), 1, 2), l_t)) / Psi[0]
+        term5 = torch.sum(Y_residual**2 / Psi_nt.t()) / D
+        term6 = -2 * torch.sum(Y_residual * muL / Psi_nt.t()) / D
+        term7a = torch.trace(torch.chain_matmul(L_nt, L_nt.t() / Psi_nt, sigma))
+        term7b = torch.sum(muL**2 / Psi_nt.t()) / D
+
+        # calculate loss and perform autograd
+        loss = term1 + term2 + term3 + term4 + term5 + term6 + term7a + term7b
+        loss.backward()
+        # extract gradient
+        grad = tparams.grad.detach().numpy()
+
+        # apply masks to the gradient
+        grad[:N] *= a_mask.ravel()
+        grad[N:(N + M)] *= b_mask.ravel()
+
+        # if we're training non-target tuning parameters, apply selection mask
+        if train_B:
+            grad[(N + M):(N + M + N * M)] *= B_mask.ravel()
+        else:
+            grad[(N + M):(N + M + N * M)] = 0
+
+        # mask out gradients for parameters not being trained
+        if not train_log_Psi_nt:
+            grad[(N + M + N * M + 1):(N + M + N * M + N + 1)] = 0
+        if not train_log_Psi:
+            grad[(N + M + N * M):(N + M + N * M + N + 1)] = 0
+        if not train_L_nt:
+            mask = np.zeros(grad[(N + M + N * M + N + 1):].size)
+            mask[0::(N + 1)] = np.ones(K)
+            grad[(N + M + N * M + N + 1):] *= mask
+        if not train_L:
+            grad[(N + M + N * M + N + 1):] = 0
+
+        return loss.detach().numpy(), grad
+
+    @staticmethod
+    def f_df_em_owlbfgs(params, grad, *args):
+        """Wrapper for OW LBFGS"""
+        loss, g = EMSolver.f_df_em(params, *args)
+        grad[:] = g
+        return loss
 
     @staticmethod
     def f_df_constraint(
