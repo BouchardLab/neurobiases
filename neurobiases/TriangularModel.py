@@ -222,7 +222,8 @@ class TriangularModel:
             )
             # generate coupling parameters
             a = self.generate_coupling_profile(self.tuning_prefs)
-
+        else:
+            raise ValueError('Parameter design not available.')
         self.coupled_indices = np.argwhere(a.ravel()).ravel()
         self.non_coupled_indices = np.setdiff1d(np.arange(self.N), self.coupled_indices)
         return a, b, B
@@ -291,7 +292,7 @@ class TriangularModel:
                 L=self.noise_kwargs.get('L_corr', 1.),
                 circular_stim=None)
             # separate non-target portion
-            non_target_noise_corr = noise_corr[:-1, :-1]
+            non_target_noise_corr = noise_corr[1:, 1:]
 
             # calculate latent factors and private variances for non-target neurons
             non_target_signal_variance = self.non_target_signal_variance()
