@@ -119,3 +119,47 @@ def marginal_log_likelihood_linear_tm_wrapper(X, Y, y, tm):
         X=X, Y=Y, y=y, a=tm.a, b=tm.b, B=tm.B, L=tm.L, Psi=tm.Psi
     )
     return ll
+
+
+def fista(f_df, params, lr, C0=0., C1=0., zero_start=-1, zero_end=-1,
+          one_start=-1, one_end=-1, args=None, max_iter=250, tol=1e-8, verbose=False):
+    if args is None:
+        args = tuple()
+    yt = params.copy()
+    xtm = params.copy()
+    t = 1.
+    loss = None
+    sl0 = slice(0, 0)
+    sl1 = slice(0, 0)
+    if C0 > 0.:
+        sl0 = slice(zero_start, zero_end)
+    if C1 > 0.:
+        sl1 = slice(one_start, one_end)
+    print(C0, C1)
+
+    for ii in range(max_iter):
+        lossp, grad = f_df(yt, *args)
+        print('loop', lossp, np.sum(abs(yt[sl0])), np.sum(abs(yt[sl1])))
+        losst = lossp
+        if C0 > 0.:
+            losst = losst + C0 * np.sum(abs(yt[sl0]))
+        if C1 > 0.:
+            losst = losst + C1 * np.sum(abs(yt[sl1]))
+        if loss is not None:
+            if (loss - losst) / max(1., max(abs(loss), abs(losst))) < tol:
+                break
+        else:
+            losso = losst
+        loss = losst
+        xt = yt - grad * lr
+        if C0 > 0.:
+            xt[sl0] = np.maximum(abs(xt[sl0]) - C0 * lr, 0.) * np.sign(xt[sl0])
+        if C1 > 0.:
+            xt[sl1] = np.maximum(abs(xt[sl1]) - C1 * lr, 0.) * np.sign(xt[sl1])
+        t = 0.5 * (1. + np.sqrt(1. + 4 * t**2))
+        yt = xt + (t - 1.) * (xt - xtm) / t
+        xtm = xt
+    if verbose:
+        string = 'M step stopped on iteration {} of {} with loss {} and initial loss {}.'
+        print(string.format(ii+1, max_iter, losst, losso))
+    return yt
