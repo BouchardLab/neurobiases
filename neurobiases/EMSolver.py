@@ -452,19 +452,20 @@ class EMSolver():
             A vector containing all parameters concatenated together.
         """
         params = self.get_params()
-        if verbose:
-            # create callback function
-            def callback(params):
-                print(
-                    'Expected complete log-likelihood:',
-                    self.expected_complete_ll(params, self.X, self.Y, self.y,
-                                              mu, zz, sigma)
-                )
-        else:
-            callback = None
 
         # run m-step minimization
         if self.solver == 'scipy_lbfgs':
+            # create callable for scipy function
+            if verbose:
+                # create callback function
+                def callback(params):
+                    print(
+                        'Expected complete log-likelihood:',
+                        self.expected_complete_ll(params, self.X, self.Y, self.y,
+                                                mu, zz, sigma)
+                    )
+            else:
+                callback = None
             optimize = minimize(
                 self.f_df_em, x0=params,
                 method='L-BFGS-B',
@@ -476,6 +477,19 @@ class EMSolver():
             # extract optimized parameters
             params = optimize.x
         elif self.solver == 'ow_lbfgs':
+            # create callable for owlbfgs
+            if verbose:
+                # create callback function
+                def progress(x, g, fx, xnorm, gnorm, step, k, num_eval, *args):
+                    print(
+                        'Expected complete log-likelihood:',
+                        self.expected_complete_ll(x, self.X, self.Y, self.y,
+                                                mu, zz, sigma)
+                    )
+            else:
+                progress = None
+
+            # handle the various cases with penalties
             if self.c_coupling != 0 and self.c_tuning != 0:
                 orthantwise_start = 0
                 orthantwise_end = self.N + self.M + self.N * self.M
@@ -496,16 +510,18 @@ class EMSolver():
                 orthantwise_end = -1
                 c = 0
                 tuning_to_coupling_ratio = 1.
-            print('tuning', self.c_tuning, 'coupling', self.c_coupling, 'ratio', tuning_to_coupling_ratio)
+
             params = fmin_lbfgs(
                 self.f_df_em_owlbfgs, x0=params,
                 args=(self.X, self.Y, self.y, self.a_mask, self.b_mask, self.B_mask,
                       self.train_B, self.train_L_nt, self.train_L, self.train_log_Psi_nt,
                       self.train_log_Psi, mu, zz, sigma, tuning_to_coupling_ratio),
+                progress=progress,
                 orthantwise_c=c,
                 orthantwise_start=orthantwise_start,
                 orthantwise_end=orthantwise_end)
             a, b, B, log_Psi, L = self.split_params(params)
+            print(log_Psi.ravel())
             b = b / tuning_to_coupling_ratio
             B = B / tuning_to_coupling_ratio
             params = np.concatenate((a.ravel(),
@@ -1067,6 +1083,11 @@ class EMSolver():
 
         # calculate loss and perform autograd
         loss = term1 + term2 + term3 + term4 + term5 + term6 + term7a + term7b
+        if torch.any(log_Psi > 10):
+            print('Loss:', loss.detach().numpy().item(), 'log Psi penalty:',
+                  (10 * torch.sum(log_Psi**2).detach()).item(),
+                  'log Psi:', log_Psi.detach().numpy()) 
+            loss = loss + 0.01 * torch.sum(log_Psi**2)
         loss.backward()
         # extract gradient
         grad = tparams.grad.detach().numpy()
