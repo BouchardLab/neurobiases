@@ -520,6 +520,7 @@ class EMSolver():
                 orthantwise_c=c,
                 orthantwise_start=orthantwise_start,
                 orthantwise_end=orthantwise_end)
+
             a, b, B, log_Psi, L = self.split_params(params)
             print(log_Psi.ravel())
             b = b / tuning_to_coupling_ratio
@@ -529,6 +530,29 @@ class EMSolver():
                                      B.ravel(),
                                      log_Psi.ravel(),
                                      L.ravel()))
+        elif self.solver == 'fista':
+            zero_start = -1
+            zero_end = -1
+            one_start = -1
+            one_end = -1
+            if self.c_coupling > 0.:
+                zero_start = 0
+                zero_end = self.N
+            if self.c_tuning > 0.:
+                one_start = self.N
+                one_end = self.N + self.M + self.N * self.M
+            args = (self.X, self.Y, self.y, self.a_mask, self.b_mask, self.B_mask,
+                    self.train_B, self.train_L_nt, self.train_L, self.train_log_Psi_nt,
+                    self.train_log_Psi, mu, zz, sigma, 1.)
+            params = utils.fista(self.f_df_em, params, 1e-6,
+                                 self.c_coupling,
+                                 self.c_tuning,
+                                 zero_start,
+                                 zero_end,
+                                 one_start,
+                                 one_end,
+                                 verbose=True,
+                                 args=args)
 
         return params
 
