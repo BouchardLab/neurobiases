@@ -135,11 +135,9 @@ def fista(f_df, params, lr, C0=0., C1=0., zero_start=-1, zero_end=-1,
         sl0 = slice(zero_start, zero_end)
     if C1 > 0.:
         sl1 = slice(one_start, one_end)
-    print(C0, C1)
 
     for ii in range(max_iter):
         lossp, grad = f_df(yt, *args)
-        print('loop', lossp, np.sum(abs(yt[sl0])), np.sum(abs(yt[sl1])))
         losst = lossp
         if C0 > 0.:
             losst = losst + C0 * np.sum(abs(yt[sl0]))

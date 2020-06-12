@@ -551,7 +551,7 @@ class EMSolver():
                                  zero_end,
                                  one_start,
                                  one_end,
-                                 verbose=True,
+                                 verbose=verbose,
                                  args=args)
 
         return params
