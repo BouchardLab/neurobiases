@@ -462,7 +462,7 @@ class EMSolver():
                     print(
                         'Expected complete log-likelihood:',
                         self.expected_complete_ll(params, self.X, self.Y, self.y,
-                                                mu, zz, sigma)
+                                                  mu, zz, sigma)
                     )
             else:
                 callback = None
@@ -484,7 +484,7 @@ class EMSolver():
                     print(
                         'Expected complete log-likelihood:',
                         self.expected_complete_ll(x, self.X, self.Y, self.y,
-                                                mu, zz, sigma)
+                                                  mu, zz, sigma)
                     )
             else:
                 progress = None
@@ -522,7 +522,6 @@ class EMSolver():
                 orthantwise_end=orthantwise_end)
 
             a, b, B, log_Psi, L = self.split_params(params)
-            print(log_Psi.ravel())
             b = b / tuning_to_coupling_ratio
             B = B / tuning_to_coupling_ratio
             params = np.concatenate((a.ravel(),
@@ -611,7 +610,8 @@ class EMSolver():
                 if sparsity_verbose:
                     coupling_sr = np.count_nonzero(self.a) / self.N
                     tuning_sr = np.count_nonzero(self.b) / self.M
-                    sparsity_statement = 'Coupling SR = %0.3f, Tuning SR = %0.3f' % (coupling_sr, tuning_sr)
+                    sparsity_statement = \
+                        f'Coupling SR = {coupling_sr:0.3f}, Tuning SR = {tuning_sr:0.3f}'
                     print(sparsity_statement)
 
         if mll_curve:
@@ -1110,7 +1110,7 @@ class EMSolver():
         if torch.any(log_Psi > 10):
             print('Loss:', loss.detach().numpy().item(), 'log Psi penalty:',
                   (10 * torch.sum(log_Psi**2).detach()).item(),
-                  'log Psi:', log_Psi.detach().numpy()) 
+                  'log Psi:', log_Psi.detach().numpy())
             loss = loss + 0.01 * torch.sum(log_Psi**2)
         loss.backward()
         # extract gradient
