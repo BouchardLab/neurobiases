@@ -431,7 +431,7 @@ class EMSolver():
 
         return mu, zz, sigma
 
-    def m_step(self, mu, zz, sigma, verbose=False):
+    def m_step(self, mu, zz, sigma, verbose=False, fista_max_iter=250):
         """Performs an M-step in the EM algorithm for the triangular model.
 
         Parameters
@@ -453,7 +453,7 @@ class EMSolver():
         """
         params = self.get_params()
 
-        # run m-step minimization
+        # use scipy's lbfgs solver (can't handle sparsity)
         if self.solver == 'scipy_lbfgs':
             # create callable for scipy function
             if verbose:
@@ -476,6 +476,8 @@ class EMSolver():
                 jac=True)
             # extract optimized parameters
             params = optimize.x
+
+        # use orthant-wise lbfgs solver (for sparse situations)
         elif self.solver == 'ow_lbfgs':
             # create callable for owlbfgs
             if verbose:
@@ -489,22 +491,25 @@ class EMSolver():
             else:
                 progress = None
 
-            # handle the various cases with penalties
+            # penalize both coupling and tuning
             if self.c_coupling != 0 and self.c_tuning != 0:
                 orthantwise_start = 0
                 orthantwise_end = self.N + self.M + self.N * self.M
                 tuning_to_coupling_ratio = float(self.c_tuning) / self.c_coupling
                 c = self.c_coupling
+            # penalize only coupling
             elif self.c_tuning == 0 and self.c_coupling != 0:
                 orthantwise_start = 0
                 orthantwise_end = self.N
                 tuning_to_coupling_ratio = 1.
                 c = self.c_coupling
+            # penalize only tuning
             elif self.c_coupling == 0 and self.c_tuning != 0:
                 orthantwise_start = self.N
                 orthantwise_end = self.N + self.M + self.N * self.M
                 tuning_to_coupling_ratio = 1.
                 c = self.c_tuning
+            # penalize neither
             else:
                 orthantwise_start = 0
                 orthantwise_end = -1
@@ -529,6 +534,7 @@ class EMSolver():
                                      B.ravel(),
                                      log_Psi.ravel(),
                                      L.ravel()))
+        # apply fista (for the sparse setting)
         elif self.solver == 'fista':
             zero_start = -1
             zero_end = -1
@@ -543,20 +549,23 @@ class EMSolver():
             args = (self.X, self.Y, self.y, self.a_mask, self.b_mask, self.B_mask,
                     self.train_B, self.train_L_nt, self.train_L, self.train_log_Psi_nt,
                     self.train_log_Psi, mu, zz, sigma, 1.)
-            params = utils.fista(self.f_df_em, params, 1e-6,
-                                 self.c_coupling,
-                                 self.c_tuning,
-                                 zero_start,
-                                 zero_end,
-                                 one_start,
-                                 one_end,
+            params = utils.fista(self.f_df_em,
+                                 params,
+                                 lr=1e-6,
+                                 max_iter=fista_max_iter,
+                                 C0=self.c_coupling,
+                                 C1=self.c_tuning,
+                                 zero_start=zero_start,
+                                 zero_end=zero_end,
+                                 one_start=one_start,
+                                 one_end=one_end,
                                  verbose=verbose,
                                  args=args)
 
         return params
 
     def fit_em(self, verbose=False, mstep_verbose=False, mll_curve=False,
-               sparsity_verbose=False):
+               sparsity_verbose=False, fista_max_iter=250):
         """Fit the triangular model parameters using the EM algorithm.
 
         Parameters
@@ -593,7 +602,9 @@ class EMSolver():
             # run E-step
             mu, zz, sigma = self.e_step()
             # run M-step
-            params = self.m_step(mu, zz, sigma, verbose=mstep_verbose)
+            params = self.m_step(mu, zz, sigma,
+                                 verbose=mstep_verbose,
+                                 fista_max_iter=fista_max_iter)
             self.a, self.b, self.B, self.log_Psi, self.L = self.split_params(params)
 
             iteration += 1

@@ -122,7 +122,8 @@ def marginal_log_likelihood_linear_tm_wrapper(X, Y, y, tm):
 
 
 def fista(f_df, params, lr, C0=0., C1=0., zero_start=-1, zero_end=-1,
-          one_start=-1, one_end=-1, args=None, max_iter=250, tol=1e-8, verbose=False):
+          one_start=-1, one_end=-1, args=None, max_iter=250, tol=1e-8,
+          verbose=False):
     if args is None:
         args = tuple()
     yt = params.copy()
