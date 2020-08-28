@@ -431,7 +431,8 @@ class EMSolver():
 
         return mu, zz, sigma
 
-    def m_step(self, mu, zz, sigma, verbose=False, fista_max_iter=250):
+    def m_step(self, mu, zz, sigma, verbose=False, fista_max_iter=250,
+               fista_lr=1e-6):
         """Performs an M-step in the EM algorithm for the triangular model.
 
         Parameters
@@ -551,7 +552,7 @@ class EMSolver():
                     self.train_log_Psi, mu, zz, sigma, 1.)
             params = utils.fista(self.f_df_em,
                                  params,
-                                 lr=1e-6,
+                                 lr=fista_lr,
                                  max_iter=fista_max_iter,
                                  C0=self.c_coupling,
                                  C1=self.c_tuning,
@@ -565,7 +566,7 @@ class EMSolver():
         return params
 
     def fit_em(self, verbose=False, mstep_verbose=False, mll_curve=False,
-               sparsity_verbose=False, fista_max_iter=250):
+               sparsity_verbose=False, fista_max_iter=250, fista_lr=1e-6):
         """Fit the triangular model parameters using the EM algorithm.
 
         Parameters
@@ -604,7 +605,8 @@ class EMSolver():
             # run M-step
             params = self.m_step(mu, zz, sigma,
                                  verbose=mstep_verbose,
-                                 fista_max_iter=fista_max_iter)
+                                 fista_max_iter=fista_max_iter,
+                                 fista_lr=fista_lr)
             self.a, self.b, self.B, self.log_Psi, self.L = self.split_params(params)
 
             iteration += 1
