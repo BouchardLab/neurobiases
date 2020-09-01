@@ -334,9 +334,11 @@ class EMSolver():
         if y is None:
             y = self.y
 
+        # TEMP
+        Psi = np.logaddexp(0, self.log_Psi)
         mll = utils.marginal_log_likelihood_linear_tm(
             X=X, Y=Y, y=y, a=self.a, b=self.b, B=self.B, L=self.L,
-            Psi=np.exp(self.log_Psi), a_mask=self.a_mask, b_mask=self.b_mask,
+            Psi=Psi, a_mask=self.a_mask, b_mask=self.b_mask,
             B_mask=self.B_mask
         )
         return mll
@@ -349,7 +351,9 @@ class EMSolver():
         a, b, B, log_Psi, L = EMSolver.split_tparams(
             tparams, self.N, self.M, self.K)
 
-        Psi = torch.exp(log_Psi)
+        # TEMP
+        Psi = torch.logaddexp(torch.tensor(0, dtype=log_Psi.dtype), log_Psi)
+        # Psi = torch.exp(log_Psi)
         Psi_t = Psi[0]
         Psi_nt = Psi[1:].reshape(self.N, 1)  # N x 1
         l_t = L[:, 0].reshape(self.K, 1)  # K x 1
@@ -408,7 +412,9 @@ class EMSolver():
         B = self.B * self.B_mask
 
         # private variances
-        Psi = np.exp(self.log_Psi)
+        # TEMP
+        Psi = np.logaddexp(0, self.log_Psi)
+        # Psi = np.exp(self.log_Psi)
         Psi_t, Psi_negt = np.split(Psi, [1])
 
         # interaction terms
@@ -585,6 +591,7 @@ class EMSolver():
             An array containing the marginal log-likelihood of the model fit
             at each EM iteration.
         """
+        self.track_log_Psits = np.zeros(self.max_iter)
         # initialize iteration count and change in likelihood
         iteration = 0
         del_ml = np.inf
@@ -608,6 +615,10 @@ class EMSolver():
                                  fista_max_iter=fista_max_iter,
                                  fista_lr=fista_lr)
             self.a, self.b, self.B, self.log_Psi, self.L = self.split_params(params)
+            self.track_log_Psits[iteration] = self.log_Psi[0]
+            if verbose:
+                if np.any(self.log_Psi > 10):
+                    print("Log psi getting too big")
 
             iteration += 1
             # update marginal log-likelihood
@@ -669,7 +680,9 @@ class EMSolver():
         l_t = self.L[:, 0][..., np.newaxis]
         L_nt = self.L[:, 1:]
         # grab private variances
-        Psi = np.exp(self.log_Psi)
+        # TEMP
+        Psi = np.logaddexp(0, self.log_Psi)
+        # Psi = np.exp(self.log_Psi)
         Psi_t = Psi[0]
         Psi_nt = np.diag(Psi[1:])
 
@@ -965,7 +978,9 @@ class EMSolver():
         b = b * torch.tensor(b_mask, dtype=b.dtype)
         B = B * torch.tensor(B_mask, dtype=B.dtype)
         # split up terms into target/non-target components
-        Psi = torch.exp(log_Psi)
+        # TEMP
+        Psi = torch.logaddexp(torch.tensor(0, dtype=log_Psi.dtype), log_Psi)
+        # Psi = torch.exp(log_Psi)
         Psi_t = Psi[0]
         Psi_nt = Psi[1:].reshape(N, 1)  # N x 1
         l_t = L[:, 0].reshape(K, 1)  # K x 1
@@ -1088,7 +1103,9 @@ class EMSolver():
         b = b / tuning_to_coupling_ratio
         B = B / tuning_to_coupling_ratio
         # split up terms into target/non-target components
-        Psi = torch.exp(log_Psi)
+        # TEMP
+        Psi = torch.logaddexp(torch.tensor(0, dtype=log_Psi.dtype), log_Psi)
+        # Psi = torch.exp(log_Psi)
         Psi_nt = Psi[1:]
         l_t = L[:, 0].reshape(K, 1)
         L_nt = L[:, 1:]
@@ -1108,7 +1125,9 @@ class EMSolver():
 
         # calculate expected complete log-likelihood, term by term
         # see paper for derivation
-        term1 = torch.sum(log_Psi)
+        # TEMP
+        term1 = torch.sum(torch.log(Psi))
+        # term1 = torch.sum(log_Psi)
         term2 = torch.mean(y_residual**2 / Psi[0])
         term3 = torch.mean((-2. / Psi[0]) * y_residual * torch.mm(mu, l_t))
         term4 = torch.mean(
@@ -1120,11 +1139,6 @@ class EMSolver():
 
         # calculate loss and perform autograd
         loss = term1 + term2 + term3 + term4 + term5 + term6 + term7a + term7b
-        if torch.any(log_Psi > 10):
-            print('Loss:', loss.detach().numpy().item(), 'log Psi penalty:',
-                  (10 * torch.sum(log_Psi**2).detach()).item(),
-                  'log Psi:', log_Psi.detach().numpy())
-            loss = loss + 0.01 * torch.sum(log_Psi**2)
         loss.backward()
         # extract gradient
         grad = tparams.grad.detach().numpy()
@@ -1350,7 +1364,8 @@ class EMSolver():
         # unravel coupling terms for easy products
         a = a.ravel()
         # private variances
-        Psi = np.exp(log_Psi)
+        Psi = np.logaddexp(0, log_Psi)
+        # Psi = np.exp(log_Psi)
         Psi_t = Psi[0]
         Psi_nt = Psi[1:]
         # bases
@@ -1389,7 +1404,9 @@ class EMSolver():
         log_Psi = tparams[(N + M + N * M):(N + M + N * M + N + 1)].reshape(N + 1, 1)
         L = tparams[(N + M + N * M + N + 1):].reshape(K, N + 1)
 
-        Psi = torch.exp(log_Psi)
+        # TEMP
+        Psi = torch.logaddexp(torch.tensor(0, dtype=log_Psi.dtype), log_Psi)
+        # Psi = torch.exp(log_Psi)
         Psi_nt = Psi[1:]
         l_t = L[:, 0].reshape(K, 1)
         L_nt = L[:, 1:]
@@ -1407,7 +1424,9 @@ class EMSolver():
 
         muL = torch.mm(mu, L_nt)
 
-        term1 = torch.sum(log_Psi)
+        # TEMP
+        term1 = torch.sum(torch.log(Psi))
+        # term1 = torch.sum(log_Psi)
         term2 = torch.mean(y_residual**2 / Psi[0])
         term3 = torch.mean((-2. / Psi[0]) * y_residual * torch.mm(mu, l_t))
         term4 = torch.mean(
