@@ -1,5 +1,9 @@
 import numpy as np
 
+from neurobiases import EMSolver
+from sklearn.model_selection import check_cv
+from sklearn.utils.extmath import cartesian
+
 
 def marginal_log_likelihood_linear_tm(
     X, Y, y, a, b, B, L, Psi, a_mask=None, b_mask=None, B_mask=None
@@ -162,3 +166,60 @@ def fista(f_df, params, lr, C0=0., C1=0., zero_start=-1, zero_end=-1,
         string = 'M step stopped on iteration {} of {} with loss {} and initial loss {}.'
         print(string.format(ii+1, max_iter, losst, losso))
     return yt
+
+
+def cv_sparse_em_solver(
+    X, Y, y, coupling_lambdas, tuning_lambdas, Ks, cv=5,
+    solver='ow_lbfgs', max_iter=1000, tol=1e-4, random_state=None,
+    comm=None
+):
+    # handle MPI communicators
+    rank = 0
+    size = 1
+    if comm is not None:
+        from mpi_utils.ndarray import Gatherv_rows
+        rank = comm.rank
+        size = comm.size
+
+    # get cv objects
+    cv = check_cv(cv=cv)
+    n_splits = cv.get_n_splits()
+    # assign tasks
+    hyperparameters = cartesian((coupling_lambdas, tuning_lambdas, Ks))
+    tasks = np.array_split(hyperparameters, size)[rank]
+    n_tasks = len(tasks)
+    # create storage
+    scores = np.zeros((n_splits, n_tasks))
+
+    for split_idx, (train_idx, test_idx) in enumerate(cv.split(X, y)):
+        print(f'fold {split_idx}')
+        # get training set
+        X_train = X[train_idx]
+        Y_train = Y[train_idx]
+        y_train = y[train_idx]
+        # get test set
+        X_test = X[test_idx]
+        Y_test = Y[test_idx]
+        y_test = y[test_idx]
+
+        # iterate over hyperparameters
+        for task_idx, (c_coupling, c_tuning, K) in enumerate(tasks):
+            print(f'{c_coupling}, {c_tuning}, {K}')
+            # run the sparse fitter
+            solver = EMSolver(
+                X=X_train, Y=Y_train, y=y_train,
+                K=K,
+                solver=solver,
+                max_iter=max_iter,
+                tol=tol,
+                c_tuning=c_tuning,
+                c_coupling=c_coupling,
+                random_state=random_state)
+            solver.fit_em(verbose=False)
+            # score the resulting fit
+            scores[split_idx, task_idx] = solver.marginal_log_likelihood(
+                X=X_test, Y=Y_test, y=y_test
+            )
+    if comm is not None:
+        scores = Gatherv_rows(scores, comm)
+    return scores
