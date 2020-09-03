@@ -45,6 +45,21 @@ def sigmoid(x, phase=0, b=1):
     return 1./(1 + np.exp(-b * (x - phase)))
 
 
+def inv_softplus(x):
+    """Calculates the inverse softplus function.
+
+    Parameters
+    ----------
+    x : np.ndarray
+        Input array.
+
+    Returns
+    -------
+    inv_softplus : np.ndarray
+        The inverse softplus of the input.
+    """
+    return np.log(np.exp(x) - 1)
+
 def bf_mean(center, scale, limits=(0, 1)):
     """Calculates the mean of a Gaussian basis function feature where the
     input behaves as a uniform distribution.

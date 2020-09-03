@@ -4,6 +4,7 @@ import torch
 from .lbfgs import fmin_lbfgs
 from neurobiases import plot
 from neurobiases import solver_utils as utils
+from neurobiases.utils import inv_softplus
 from scipy.optimize import minimize
 from sklearn.utils import check_random_state
 
@@ -34,11 +35,10 @@ class EMSolver():
         The non-target latent factors.
     L : np.ndarray, shape (K, N+1)
         All latent factors. This variable takes precedence over L_nt.
-    log_Psi_nt : np.ndarray, shape (N,)
+    Psi_nt : np.ndarray, shape (N,)
         The non-target private variances.
-    log_Psi : np.ndarray, shape (N + 1,)
-        The private variances. This variable takes precedence over
-        log_Psi_nt.
+    Psi : np.ndarray, shape (N + 1,)
+        The private variances. This variable takes precedence over Psi_nt.
     max_iter : int
         The maximum number of optimization iterations to perform.
     tol : float
@@ -48,7 +48,7 @@ class EMSolver():
     """
     def __init__(
         self, X, Y, y, K, a_mask=None, b_mask=None, B_mask=None,
-        B=None, L_nt=None, L=None, log_Psi_nt=None, log_Psi=None,
+        B=None, L_nt=None, L=None, Psi_nt=None, Psi=None,
         solver='scipy_lbfgs', max_iter=1000, tol=1e-4, c_tuning=1., c_coupling=1.,
         random_state=None
     ):
@@ -75,7 +75,7 @@ class EMSolver():
         # initialize non-target tuning parameters
         self.freeze_B(B=B)
         # initialize variability parameters
-        self.freeze_var_params(L_nt=L_nt, L=L, log_Psi_nt=log_Psi_nt, log_Psi=log_Psi)
+        self.freeze_var_params(L_nt=L_nt, L=L, Psi_nt=Psi_nt, Psi=Psi)
 
     def _init_params(self):
         """Initialize parameter estimates. Requires that X, Y, and y are
@@ -92,7 +92,7 @@ class EMSolver():
         # non-target tuning parameters
         self.B = np.zeros((self.M, self.N))
         # private variances
-        self.log_Psi = np.zeros(self.N + 1)
+        self.Psi_tr = np.zeros(self.N + 1)
         # latent factors are initialized to be small, random values
         self.L = self.random_state.normal(loc=0., scale=0.1, size=(self.K, self.N + 1))
 
@@ -125,7 +125,7 @@ class EMSolver():
         else:
             self.B_mask = B_mask.reshape((self.M, self.N))
 
-    def set_params(self, a=None, b=None, B=None, log_Psi=None, L=None):
+    def set_params(self, a=None, b=None, B=None, Psi_tr=None, L=None):
         """Sets parameters equal to the provided parameter values.
 
         Parameters
@@ -136,7 +136,7 @@ class EMSolver():
             The tuning parameters.
         B : np.ndarray, shape (M, N)
             The non-target tuning parameters.
-        log_Psi : np.ndarray, shape (N + 1,)
+        Psi_tr : np.ndarray, shape (N + 1,)
             The private variances.
         L : np.ndarray, shape (K, N+1)
             The latent factors.
@@ -147,8 +147,8 @@ class EMSolver():
             self.b = np.copy(b.reshape((self.M, 1)))
         if B is not None:
             self.B = np.copy(B.reshape(((self.M, self.N))))
-        if log_Psi is not None:
-            self.log_Psi = np.copy(log_Psi.reshape(self.N + 1))
+        if Psi_tr is not None:
+            self.Psi_tr = np.copy(Psi_tr.reshape(self.N + 1))
         if L is not None:
             self.L = np.copy(L.reshape((self.K, self.N + 1)))
 
@@ -169,7 +169,7 @@ class EMSolver():
         else:
             self.train_B = True
 
-    def freeze_var_params(self, L_nt=None, L=None, log_Psi_nt=None, log_Psi=None):
+    def freeze_var_params(self, L_nt=None, L=None, Psi_nt=None, Psi=None):
         """Sets all (or a subset of) the variance parameters, and freezes them
         so that they cannot be trained.
 
@@ -179,9 +179,9 @@ class EMSolver():
             The non-target latent factors.
         L : np.ndarray, shape (K, N+1)
             All latent factors. This variable takes precedence over L_nt.
-        log_Psi_nt : np.ndarray, shape (N,)
+        Psi_nt : np.ndarray, shape (N,)
             The non-target private variances.
-        log_Psi : np.ndarray, shape (N + 1,)
+        Psi : np.ndarray, shape (N + 1,)
             The private variances. This variable takes precedence over
             log_Psi_nt.
         """
@@ -200,19 +200,19 @@ class EMSolver():
         else:
             self.train_L = True
         # initialize all non-target private variances
-        if log_Psi_nt is not None:
-            self.log_Psi_nt_init = log_Psi_nt
-            self.log_Psi[1:] = log_Psi_nt
-            self.train_log_Psi_nt = False
+        if Psi_nt is not None:
+            self.Psi_tr_nt_init = inv_softplus(Psi_nt)
+            self.Psi_tr[1:] = np.copy(self.Psi_tr_nt_init)
+            self.train_Psi_tr_nt = False
         else:
-            self.train_log_Psi_nt = True
+            self.train_Psi_tr_nt = True
         # initialize all private variances
-        if log_Psi is not None:
-            self.log_Psi_init = log_Psi
-            self.log_Psi = log_Psi
-            self.train_log_Psi = False
+        if Psi is not None:
+            self.Psi_tr_init = inv_softplus(Psi)
+            self.Psi_tr = np.copy(self.Psi_tr_init)
+            self.train_Psi_tr = False
         else:
-            self.train_log_Psi = True
+            self.train_Psi_tr = True
 
     def reset_params(self):
         """Reset parameter estimates. If parameter estimates were trained,
@@ -235,15 +235,15 @@ class EMSolver():
         else:
             self.L[:, 1:] = np.random.normal(size=(self.K, self.N))
 
-        if self.train_log_Psi_nt:
-            self.log_Psi[1:] = self.log_Psi_nt_init
+        if self.train_Psi_tr_nt:
+            self.Psi_tr[1:] = np.copy(self.Psi_tr_nt_init)
         else:
-            self.log_Psi[1:] = np.zeros(self.N + 1)
+            self.Psi_tr[1:] = np.zeros(self.N + 1)
 
-        if self.train_log_Psi:
-            self.log_Psi = self.log_Psi_init
+        if self.train_Psi_tr:
+            self.Psi_tr = np.copy(self.Psi_tr_init)
         else:
-            self.log_Psi = np.zeros(self.N + 1)
+            self.Psi_tr = np.zeros(self.N + 1)
 
     def get_params(self):
         """Concatenates all parameters into a single vector.
@@ -256,7 +256,7 @@ class EMSolver():
         params = np.concatenate((self.a.ravel(),
                                  self.b.ravel(),
                                  self.B.ravel(),
-                                 self.log_Psi.ravel(),
+                                 self.Psi_tr.ravel(),
                                  self.L.ravel()))
         return params
 
@@ -276,7 +276,7 @@ class EMSolver():
             The tuning parameters.
         B : np.ndarray, shape (M, N)
             The non-target tuning parameters.
-        log_Psi : np.ndarray, shape (N + 1,)
+        Psi_tr : np.ndarray, shape (N + 1,)
             The private variances.
         L : np.ndarray, shape (K, N+1)
             The latent factors.
@@ -285,12 +285,12 @@ class EMSolver():
         b = params[self.N:(self.N + self.M)].reshape((self.M, 1))
         B = params[(self.N + self.M):
                    (self.N + self.M + self.M * self.N)].reshape((self.M, self.N))
-        log_Psi = params[(self.N + self.M + self.M * self.N):
-                         (self.N + self.M + self.M * self.N + self.N + 1)].reshape(
+        Psi_tr = params[(self.N + self.M + self.M * self.N):
+                        (self.N + self.M + self.M * self.N + self.N + 1)].reshape(
             self.N + 1)
         L = params[(self.N + self.M + self.N * self.M + self.N + 1):].reshape(
             (self.K, self.N + 1))
-        return a, b, B, log_Psi, L
+        return a, b, B, Psi_tr, L
 
     def copy(self):
         """Returns a copy of the current EMSolver object.
@@ -303,7 +303,7 @@ class EMSolver():
         copy = EMSolver(X=self.X, Y=self.Y, y=self.y, K=self.K,
                         a_mask=self.a_mask, b_mask=self.b_mask, B_mask=self.B_mask)
         copy.set_params(a=self.a, b=self.b, B=self.B,
-                        log_Psi=self.log_Psi, L=self.L)
+                        Psi_tr=self.Psi_tr, L=self.L)
         return copy
 
     def marginal_log_likelihood(self, X=None, Y=None, y=None):
@@ -334,8 +334,7 @@ class EMSolver():
         if y is None:
             y = self.y
 
-        # TEMP
-        Psi = np.logaddexp(0, self.log_Psi)
+        Psi = np.logaddexp(0, self.Psi_tr)
         mll = utils.marginal_log_likelihood_linear_tm(
             X=X, Y=Y, y=y, a=self.a, b=self.b, B=self.B, L=self.L,
             Psi=Psi, a_mask=self.a_mask, b_mask=self.b_mask,
@@ -348,11 +347,11 @@ class EMSolver():
         params = self.get_params()
         n_params = params.size
         tparams = torch.tensor(params, requires_grad=True)
-        a, b, B, log_Psi, L = EMSolver.split_tparams(
+        a, b, B, Psi_tr, L = EMSolver.split_tparams(
             tparams, self.N, self.M, self.K)
 
         # TEMP
-        Psi = torch.logaddexp(torch.tensor(0, dtype=log_Psi.dtype), log_Psi)
+        Psi = torch.logaddexp(torch.tensor(0, dtype=Psi_tr.dtype), Psi_tr)
         # Psi = torch.exp(log_Psi)
         Psi_t = Psi[0]
         Psi_nt = Psi[1:].reshape(self.N, 1)  # N x 1
@@ -412,9 +411,7 @@ class EMSolver():
         B = self.B * self.B_mask
 
         # private variances
-        # TEMP
-        Psi = np.logaddexp(0, self.log_Psi)
-        # Psi = np.exp(self.log_Psi)
+        Psi = np.logaddexp(0, self.Psi_tr)
         Psi_t, Psi_negt = np.split(Psi, [1])
 
         # interaction terms
@@ -477,8 +474,8 @@ class EMSolver():
                 self.f_df_em, x0=params,
                 method='L-BFGS-B',
                 args=(self.X, self.Y, self.y, self.a_mask, self.b_mask, self.B_mask,
-                      self.train_B, self.train_L_nt, self.train_L, self.train_log_Psi_nt,
-                      self.train_log_Psi, mu, zz, sigma, 1.),
+                      self.train_B, self.train_L_nt, self.train_L, self.train_Psi_tr_nt,
+                      self.train_Psi_tr, mu, zz, sigma, 1.),
                 callback=callback,
                 jac=True)
             # extract optimized parameters
@@ -526,20 +523,20 @@ class EMSolver():
             params = fmin_lbfgs(
                 self.f_df_em_owlbfgs, x0=params,
                 args=(self.X, self.Y, self.y, self.a_mask, self.b_mask, self.B_mask,
-                      self.train_B, self.train_L_nt, self.train_L, self.train_log_Psi_nt,
-                      self.train_log_Psi, mu, zz, sigma, tuning_to_coupling_ratio),
+                      self.train_B, self.train_L_nt, self.train_L, self.train_Psi_tr_nt,
+                      self.train_Psi_tr, mu, zz, sigma, tuning_to_coupling_ratio),
                 progress=progress,
                 orthantwise_c=c,
                 orthantwise_start=orthantwise_start,
                 orthantwise_end=orthantwise_end)
 
-            a, b, B, log_Psi, L = self.split_params(params)
+            a, b, B, Psi_tr, L = self.split_params(params)
             b = b / tuning_to_coupling_ratio
             B = B / tuning_to_coupling_ratio
             params = np.concatenate((a.ravel(),
                                      b.ravel(),
                                      B.ravel(),
-                                     log_Psi.ravel(),
+                                     Psi_tr.ravel(),
                                      L.ravel()))
         # apply fista (for the sparse setting)
         elif self.solver == 'fista':
@@ -554,8 +551,8 @@ class EMSolver():
                 one_start = self.N
                 one_end = self.N + self.M + self.N * self.M
             args = (self.X, self.Y, self.y, self.a_mask, self.b_mask, self.B_mask,
-                    self.train_B, self.train_L_nt, self.train_L, self.train_log_Psi_nt,
-                    self.train_log_Psi, mu, zz, sigma, 1.)
+                    self.train_B, self.train_L_nt, self.train_L, self.train_Psi_tr_nt,
+                    self.train_Psi_tr, mu, zz, sigma, 1.)
             params = utils.fista(self.f_df_em,
                                  params,
                                  lr=fista_lr,
@@ -591,7 +588,6 @@ class EMSolver():
             An array containing the marginal log-likelihood of the model fit
             at each EM iteration.
         """
-        self.track_log_Psits = np.zeros(self.max_iter)
         # initialize iteration count and change in likelihood
         iteration = 0
         del_ml = np.inf
@@ -614,11 +610,7 @@ class EMSolver():
                                  verbose=mstep_verbose,
                                  fista_max_iter=fista_max_iter,
                                  fista_lr=fista_lr)
-            self.a, self.b, self.B, self.log_Psi, self.L = self.split_params(params)
-            self.track_log_Psits[iteration] = self.log_Psi[0]
-            if verbose:
-                if np.any(self.log_Psi > 10):
-                    print("Log psi getting too big")
+            self.a, self.b, self.B, self.Psi_tr, self.L = self.split_params(params)
 
             iteration += 1
             # update marginal log-likelihood
@@ -661,11 +653,11 @@ class EMSolver():
             args=(self.X, self.Y, self.y, self.K,
                   self.a_mask, self.b_mask, self.B_mask,
                   self.train_B, self.train_L, self.train_L_nt,
-                  self.train_log_Psi_nt, self.train_log_Psi),
+                  self.train_Psi_tr_nt, self.train_Psi_tr),
             callback=callback,
             jac=True)
         params = optimize.x
-        self.a, self.b, self.B, self.log_Psi, self.L = self.split_params(params)
+        self.a, self.b, self.B, self.Psi_tr, self.L = self.split_params(params)
         return self
 
     def identifiability_transform(self, delta):
@@ -680,9 +672,7 @@ class EMSolver():
         l_t = self.L[:, 0][..., np.newaxis]
         L_nt = self.L[:, 1:]
         # grab private variances
-        # TEMP
-        Psi = np.logaddexp(0, self.log_Psi)
-        # Psi = np.exp(self.log_Psi)
+        Psi = np.logaddexp(0, self.Psi_tr)
         Psi_t = Psi[0]
         Psi_nt = np.diag(Psi[1:])
 
@@ -703,7 +693,7 @@ class EMSolver():
             - np.dot(delta_aug.T, delta_aug) \
             - 2 * np.dot(L_aug.T, delta_aug)
 
-        self.log_Psi[0] = np.log(Psi_t + correction)
+        self.Psi_tr[0] = np.log(Psi_t + correction)
         self.L[:, 0] = self.L[:, 0] + delta.ravel()
         self.a = self.a + Delta
         self.b = self.b - np.dot(self.B, Delta)
@@ -730,8 +720,8 @@ class EMSolver():
         # latent factors
         l_t = self.L[:, 0][..., np.newaxis]
         L_nt = self.L[:, 1:]
-        # private variance
-        Psi = np.exp(self.log_Psi)
+        # grab private variances
+        Psi = np.logaddexp(0, self.Psi_tr)
         Psi_t = Psi[0]
         Psi_nt = np.diag(Psi[1:])
 
@@ -776,8 +766,8 @@ class EMSolver():
         """
         # latent factors
         L_nt = self.L[:, 1:]
-        # private variance
-        Psi = np.exp(self.log_Psi)
+        # grab private variances
+        Psi = np.logaddexp(0, self.Psi_tr)
         Psi_nt = np.diag(Psi[1:])
 
         optimize = minimize(
@@ -805,7 +795,7 @@ class EMSolver():
     def calculate_private_shared_ratio(self):
         """Calculate the ratio of private variance to shared variance, for all
         neurons."""
-        return np.exp(self.log_Psi) / np.diag(np.dot(self.L.T, self.L))
+        return np.logaddexp(0, self.Psi_tr) / np.diag(np.dot(self.L.T, self.L))
 
     def plot_tc_fits(self, tm, fax=None, color='black', edgecolor='white'):
         """Scatters estimated tuning and coupling fits against ground truth
@@ -867,7 +857,7 @@ class EMSolver():
         B_true = tm.B
         L_hat = self.L
         L_true = tm.L
-        Psi_hat = np.exp(self.log_Psi)
+        Psi_hat = np.logaddexp(0, self.Psi_tr)
         Psi_true = tm.Psi
 
         fig, axes = plot.plot_tm_fits(
@@ -900,7 +890,7 @@ class EMSolver():
             The tuning parameters.
         B : torch.tensor, shape (M, N)
             The non-target tuning parameters.
-        log_Psi : torch.tensor, shape (N + 1,)
+        Psi_tr : torch.tensor, shape (N + 1,)
             The private variances.
         L : torch.tensor, shape (K, N+1)
             The latent factors.
@@ -908,14 +898,14 @@ class EMSolver():
         a = tparams[:N].reshape(N, 1)
         b = tparams[N:(N + M)].reshape(M, 1)
         B = tparams[(N + M):(N + M + N * M)].reshape(M, N)
-        log_Psi = tparams[(N + M + N * M):(N + M + N * M + N + 1)].reshape(N + 1, 1)
+        Psi_tr = tparams[(N + M + N * M):(N + M + N * M + N + 1)].reshape(N + 1, 1)
         L = tparams[(N + M + N * M + N + 1):].reshape(K, N + 1)
-        return a, b, B, log_Psi, L
+        return a, b, B, Psi_tr, L
 
     @staticmethod
     def f_df_ml(
         params, X, Y, y, K, a_mask, b_mask, B_mask, train_B, train_L_nt, train_L,
-        train_log_Psi_nt, train_log_Psi
+        train_Psi_tr_nt, train_Psi_tr
     ):
         """Helper function for parameter fitting with maximum likelihood.
         Calculates the log-likelihood of the neural activity and gradients
@@ -951,12 +941,12 @@ class EMSolver():
             If True, latent factors will be trained. Takes precedence over
             train_L_nt.
 
-        train_log_Psi_nt : bool
+        train_Psi_tr_nt : bool
             If True, non-target private variances will be trained.
 
-        train_log_Psi : bool
+        train_Psi_tr : bool
             If True, private variances will be trained. Takes precedence over
-            train_log_Psi_nt.
+            train_Psi_tr_nt.
 
         Returns
         -------
@@ -973,14 +963,12 @@ class EMSolver():
         N = Y.shape[1]
         # turn parameters into torch tensors
         tparams = torch.tensor(params, requires_grad=True)
-        a, b, B, log_Psi, L = EMSolver.split_tparams(tparams, N, M, K)
+        a, b, B, Psi_tr, L = EMSolver.split_tparams(tparams, N, M, K)
         a = a * torch.tensor(a_mask, dtype=a.dtype)
         b = b * torch.tensor(b_mask, dtype=b.dtype)
         B = B * torch.tensor(B_mask, dtype=B.dtype)
         # split up terms into target/non-target components
-        # TEMP
-        Psi = torch.logaddexp(torch.tensor(0, dtype=log_Psi.dtype), log_Psi)
-        # Psi = torch.exp(log_Psi)
+        Psi = torch.logaddexp(torch.tensor(0, dtype=Psi_tr.dtype), Psi_tr)
         Psi_t = Psi[0]
         Psi_nt = Psi[1:].reshape(N, 1)  # N x 1
         l_t = L[:, 0].reshape(K, 1)  # K x 1
@@ -1028,9 +1016,9 @@ class EMSolver():
             grad[(N + M):(N + M + N * M)] = 0
 
         # mask out gradients for parameters not being trained
-        if not train_log_Psi_nt:
+        if not train_Psi_tr_nt:
             grad[(N + M + N * M + 1):(N + M + N * M + N + 1)] = 0
-        if not train_log_Psi:
+        if not train_Psi_tr:
             grad[(N + M + N * M):(N + M + N * M + N + 1)] = 0
         if not train_L:
             grad[(N + M + N * M + N + 1):] = 0
@@ -1043,7 +1031,7 @@ class EMSolver():
 
     @staticmethod
     def f_df_em(params, X, Y, y, a_mask, b_mask, B_mask, train_B, train_L_nt,
-                train_L, train_log_Psi_nt, train_log_Psi, mu, zz, sigma,
+                train_L, train_Psi_tr_nt, train_Psi_tr, mu, zz, sigma,
                 tuning_to_coupling_ratio):
         """Helper function for the M-step in the EM procedure. Calculates the
         expected complete log-likelihood and gradients with respect to all
@@ -1070,11 +1058,11 @@ class EMSolver():
         train_L : bool
             If True, latent factors will be trained. Takes precedence over
             train_L_nt.
-        train_log_Psi_nt : bool
+        train_Psi_tr_nt : bool
             If True, non-target private variances will be trained.
-        train_log_Psi : bool
+        train_Psi_tr : bool
             If True, private variances will be trained. Takes precedence over
-            train_log_Psi_nt.
+            train_Psi_tr_nt.
         mu : np.ndarray, shape (D, K)
             The expected value of the latent state across samples.
         zz : np.ndarray, shape (D, K, K)
@@ -1098,14 +1086,12 @@ class EMSolver():
         K = mu.shape[1]
         # turn parameters into torch tensors
         tparams = torch.tensor(params, requires_grad=True)
-        a, b, B, log_Psi, L = EMSolver.split_tparams(tparams, N, M, K)
+        a, b, B, Psi_tr, L = EMSolver.split_tparams(tparams, N, M, K)
         # apply rescaling
         b = b / tuning_to_coupling_ratio
         B = B / tuning_to_coupling_ratio
         # split up terms into target/non-target components
-        # TEMP
-        Psi = torch.logaddexp(torch.tensor(0, dtype=log_Psi.dtype), log_Psi)
-        # Psi = torch.exp(log_Psi)
+        Psi = torch.logaddexp(torch.tensor(0, dtype=Psi_tr.dtype), Psi_tr)
         Psi_nt = Psi[1:]
         l_t = L[:, 0].reshape(K, 1)
         L_nt = L[:, 1:]
@@ -1125,9 +1111,7 @@ class EMSolver():
 
         # calculate expected complete log-likelihood, term by term
         # see paper for derivation
-        # TEMP
         term1 = torch.sum(torch.log(Psi))
-        # term1 = torch.sum(log_Psi)
         term2 = torch.mean(y_residual**2 / Psi[0])
         term3 = torch.mean((-2. / Psi[0]) * y_residual * torch.mm(mu, l_t))
         term4 = torch.mean(
@@ -1154,9 +1138,9 @@ class EMSolver():
             grad[(N + M):(N + M + N * M)] = 0
 
         # mask out gradients for parameters not being trained
-        if not train_log_Psi_nt:
+        if not train_Psi_tr_nt:
             grad[(N + M + N * M + 1):(N + M + N * M + N + 1)] = 0
-        if not train_log_Psi:
+        if not train_Psi_tr:
             grad[(N + M + N * M):(N + M + N * M + N + 1)] = 0
         if not train_L_nt:
             mask = np.zeros(grad[(N + M + N * M + N + 1):].size)
@@ -1351,8 +1335,8 @@ class EMSolver():
         a = params[:N].reshape((N, 1)) * a_mask
         b = params[N:(N + M)].reshape((M, 1)) * b_mask
         B = params[(N + M):(N + M + M * N)].reshape((M, N)) * B_mask
-        log_Psi = params[(N + M + M * N):
-                         (N + M + M * N + N + 1)].reshape(N + 1)
+        Psi_tr = params[(N + M + M * N):
+                        (N + M + M * N + N + 1)].reshape(N + 1)
         L = params[(N + M + N * M + N + 1):].reshape((K, N + 1))
 
         # mean of marginal
@@ -1364,8 +1348,7 @@ class EMSolver():
         # unravel coupling terms for easy products
         a = a.ravel()
         # private variances
-        Psi = np.logaddexp(0, log_Psi)
-        # Psi = np.exp(log_Psi)
+        Psi = np.logaddexp(0, Psi_tr)
         Psi_t = Psi[0]
         Psi_nt = Psi[1:]
         # bases
@@ -1401,12 +1384,10 @@ class EMSolver():
         a = tparams[:N].reshape(N, 1)
         b = tparams[N:(N + M)].reshape(M, 1)
         B = tparams[(N + M):(N + M + N * M)].reshape(M, N)
-        log_Psi = tparams[(N + M + N * M):(N + M + N * M + N + 1)].reshape(N + 1, 1)
+        Psi_tr = tparams[(N + M + N * M):(N + M + N * M + N + 1)].reshape(N + 1, 1)
         L = tparams[(N + M + N * M + N + 1):].reshape(K, N + 1)
 
-        # TEMP
-        Psi = torch.logaddexp(torch.tensor(0, dtype=log_Psi.dtype), log_Psi)
-        # Psi = torch.exp(log_Psi)
+        Psi = torch.logaddexp(torch.tensor(0, dtype=Psi_tr.dtype), Psi_tr)
         Psi_nt = Psi[1:]
         l_t = L[:, 0].reshape(K, 1)
         L_nt = L[:, 1:]
@@ -1424,9 +1405,7 @@ class EMSolver():
 
         muL = torch.mm(mu, L_nt)
 
-        # TEMP
         term1 = torch.sum(torch.log(Psi))
-        # term1 = torch.sum(log_Psi)
         term2 = torch.mean(y_residual**2 / Psi[0])
         term3 = torch.mean((-2. / Psi[0]) * y_residual * torch.mm(mu, l_t))
         term4 = torch.mean(
