@@ -60,6 +60,7 @@ def inv_softplus(x):
     """
     return np.log(np.exp(x) - 1)
 
+
 def bf_mean(center, scale, limits=(0, 1)):
     """Calculates the mean of a Gaussian basis function feature where the
     input behaves as a uniform distribution.

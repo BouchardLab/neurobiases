@@ -1,6 +1,6 @@
 import numpy as np
 
-from neurobiases import EMSolver
+from . import EMSolver
 from sklearn.model_selection import check_cv
 from sklearn.utils.extmath import cartesian
 
@@ -206,18 +206,17 @@ def cv_sparse_em_solver(
         for task_idx, (c_coupling, c_tuning, K) in enumerate(tasks):
             print(f'{c_coupling}, {c_tuning}, {K}')
             # run the sparse fitter
-            solver = EMSolver(
+            emfit = EMSolver.EMSolver(
                 X=X_train, Y=Y_train, y=y_train,
-                K=K,
+                K=int(K),
                 solver=solver,
                 max_iter=max_iter,
                 tol=tol,
                 c_tuning=c_tuning,
                 c_coupling=c_coupling,
-                random_state=random_state)
-            solver.fit_em(verbose=False)
+                random_state=random_state).fit_em(verbose=True)
             # score the resulting fit
-            scores[split_idx, task_idx] = solver.marginal_log_likelihood(
+            scores[split_idx, task_idx] = emfit.marginal_log_likelihood(
                 X=X_test, Y=Y_test, y=y_test
             )
     if comm is not None:
