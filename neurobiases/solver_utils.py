@@ -171,8 +171,61 @@ def fista(f_df, params, lr, C0=0., C1=0., zero_start=-1, zero_end=-1,
 def cv_sparse_em_solver(
     X, Y, y, coupling_lambdas, tuning_lambdas, Ks, cv=5,
     solver='ow_lbfgs', max_iter=1000, tol=1e-4, random_state=None,
-    comm=None
+    comm=None, verbose=False
 ):
+    """Performs a cross-validated, sparse EM fit on the triangular model.
+
+    This function is parallelized with MPI. It parallelizes coupling, tuning,
+    and latent hyperparameters across cores. Fits across cross-validation folds
+    are performed within a core.
+
+    Parameters
+    ----------
+    X : np.ndarray, shape (D, M)
+        Design matrix for tuning features.
+    Y : np.ndarray, shape (D, N)
+        Design matrix for coupling features.
+    y : np.ndarray, shape (D, 1)
+        Neural response vector.
+    coupling_lambdas : np.ndarray
+        The coupling sparsity penalties to apply to the optimization.
+    tuning_lambdas : np.ndarray
+        The tuning sparsity penalties to apply to the optimization.
+    Ks : np.ndarray
+        The latent factors to iterate over.
+    cv : int, or cross-validation object
+        The number of cross-validation folds, if int. Can also be its own
+        cross-validator object.
+    solver : string
+        The sparse solver to use. Defaults to orthant-wise LBFGS.
+    max_iter : int
+        The maximum number of EM iterations.
+    tol : float
+        Convergence criteria for relative decrease in marginal log-likelihood.
+    random_state : random state object
+        Used for EM solver.
+    comm : MPI communicator
+        For MPI runs. If None, assumes that MPI is not used.
+    verbose : bool
+        If True, prints out updates during hyperparameter folds.
+
+    Returns
+    -------
+    scores : np.ndarray
+        The marginal log-likelihood of the trained model on the held out data.
+    a : np.ndarray
+        The coupling parameters.
+    b : np.ndarray
+        The tuning parameters.
+    B : np.ndarray
+        The non-target tuning parameters.
+    Psi_tr : np.ndarray
+        The transformed private variances.
+    """
+    # dimensions
+    M = X.shape[1]
+    N = Y.shape[1]
+
     # handle MPI communicators
     rank = 0
     size = 1
@@ -189,10 +242,13 @@ def cv_sparse_em_solver(
     tasks = np.array_split(hyperparameters, size)[rank]
     n_tasks = len(tasks)
     # create storage
-    scores = np.zeros((n_splits, n_tasks))
+    scores = np.zeros((n_tasks, n_splits))
+    a = np.zeros((n_tasks, n_splits, N))
+    b = np.zeros((n_tasks, n_splits, M))
+    B = np.zeros((n_tasks, n_splits, M, N))
+    Psi_tr = np.zeros((n_tasks, n_splits, N + 1))
 
     for split_idx, (train_idx, test_idx) in enumerate(cv.split(X, y)):
-        print(f'fold {split_idx}')
         # get training set
         X_train = X[train_idx]
         Y_train = Y[train_idx]
@@ -204,7 +260,9 @@ def cv_sparse_em_solver(
 
         # iterate over hyperparameters
         for task_idx, (c_coupling, c_tuning, K) in enumerate(tasks):
-            print(f'{c_coupling}, {c_tuning}, {K}')
+            if verbose:
+                print(f'Rank {rank}: fold = {split_idx + 1}',
+                      f'coupling = {c_coupling}, tuning = {c_tuning}, K = {K}')
             # run the sparse fitter
             emfit = EMSolver.EMSolver(
                 X=X_train, Y=Y_train, y=y_train,
@@ -214,11 +272,20 @@ def cv_sparse_em_solver(
                 tol=tol,
                 c_tuning=c_tuning,
                 c_coupling=c_coupling,
-                random_state=random_state).fit_em(verbose=True)
+                random_state=random_state).fit_em(verbose=False)
+            # store parameter fits
+            a[task_idx, split_idx] = emfit.a.ravel()
+            b[task_idx, split_idx] = emfit.b.ravel()
+            B[task_idx, split_idx] = emfit.B
+            Psi_tr[task_idx, split_idx] = emfit.Psi_tr.ravel()
             # score the resulting fit
-            scores[split_idx, task_idx] = emfit.marginal_log_likelihood(
+            scores[task_idx, split_idx] = emfit.marginal_log_likelihood(
                 X=X_test, Y=Y_test, y=y_test
             )
     if comm is not None:
         scores = Gatherv_rows(scores, comm)
-    return scores
+        a = Gatherv_rows(a, comm)
+        b = Gatherv_rows(b, comm)
+        B = Gatherv_rows(B, comm)
+        Psi_tr = Gatherv_rows(Psi_tr, comm)
+    return scores, a, b, B, Psi_tr
