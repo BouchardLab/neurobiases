@@ -20,7 +20,6 @@ def main(args):
     comm = MPI.COMM_WORLD
     size = comm.size
     rank = comm.rank
-    print(rank)
     if rank == 0:
         t0 = time.time()
         print('--------------------------------------------------------------')
