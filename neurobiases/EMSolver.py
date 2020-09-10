@@ -182,8 +182,7 @@ class EMSolver():
         Psi_nt : np.ndarray, shape (N,)
             The non-target private variances.
         Psi : np.ndarray, shape (N + 1,)
-            The private variances. This variable takes precedence over
-            log_Psi_nt.
+            The private variances. This variable takes precedence over Psi_nt.
         """
         # initialize non-target latent factors
         if L_nt is not None:
@@ -350,9 +349,7 @@ class EMSolver():
         a, b, B, Psi_tr, L = EMSolver.split_tparams(
             tparams, self.N, self.M, self.K)
 
-        # TEMP
         Psi = torch.logaddexp(torch.tensor(0, dtype=Psi_tr.dtype), Psi_tr)
-        # Psi = torch.exp(log_Psi)
         Psi_t = Psi[0]
         Psi_nt = Psi[1:].reshape(self.N, 1)  # N x 1
         l_t = L[:, 0].reshape(self.K, 1)  # K x 1
@@ -693,7 +690,7 @@ class EMSolver():
             - np.dot(delta_aug.T, delta_aug) \
             - 2 * np.dot(L_aug.T, delta_aug)
 
-        self.Psi_tr[0] = np.log(Psi_t + correction)
+        self.Psi_tr[0] = inv_softplus(Psi_t + correction)
         self.L[:, 0] = self.L[:, 0] + delta.ravel()
         self.a = self.a + Delta
         self.b = self.b - np.dot(self.B, Delta)
@@ -782,7 +779,8 @@ class EMSolver():
 
     def create_cov(self):
         """Calculate the covariance matrix of the noise terms."""
-        cov = np.dot(self.L.T, self.L) + np.diag(np.exp(self.log_Psi))
+        Psi = np.logaddexp(0, self.Psi_tr)
+        cov = np.dot(self.L.T, self.L) + np.diag(Psi)
         return cov
 
     def create_corr(self):
@@ -915,35 +913,25 @@ class EMSolver():
         ----------
         X : np.ndarray, shape (D, M)
             Design matrix for tuning features.
-
         Y : np.ndarray, shape (D, N)
             Design matrix for coupling features.
-
         y : np.ndarray, shape (D, 1)
             Neural response vector.
-
         a_mask : np.ndarray, shape (N, 1)
             Mask for coupling features.
-
         b_mask : nd-array, shape (M, 1)
             Mask for tuning features.
-
         B_mask : nd-array, shape (N, M)
             Mask for non-target neuron tuning features.
-
         train_B : bool
             If True, non-target tuning parameters will be trained.
-
         train_L_nt : bool
             If True, non-target latent factors will be trained.
-
         train_L : bool
             If True, latent factors will be trained. Takes precedence over
             train_L_nt.
-
         train_Psi_tr_nt : bool
             If True, non-target private variances will be trained.
-
         train_Psi_tr : bool
             If True, private variances will be trained. Takes precedence over
             train_Psi_tr_nt.
@@ -952,7 +940,6 @@ class EMSolver():
         -------
         loss : float
             The marginal log-likelihood.
-
         grad : np.ndarray
             The gradient of the loss with respect to all parameters. Any
             variables whose training flag was set to False will have corresponding
