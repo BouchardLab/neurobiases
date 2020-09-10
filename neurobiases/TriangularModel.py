@@ -274,7 +274,9 @@ class TriangularModel:
             self.L = utils.symmetric_low_rank_approx(self.L.T @ self.L, self.K).T
             self.l_t, self.L_nt = np.split(self.L, [1], axis=1)
             # calculate private variances
-            total_noise_variance = np.insert(non_target_noise_variance, 0, target_noise_variance)
+            total_noise_variance = np.insert(
+                non_target_noise_variance, 0, target_noise_variance
+            )
             self.Psi = total_noise_variance - np.diag(self.L.T @ self.L)
             self.Psi_t, self.Psi_nt = np.split(self.Psi, [1], axis=0)
 
@@ -766,7 +768,6 @@ class TriangularModel:
                 sigma=kwargs['scale'],
                 size=size)
             parameters += (kwargs['sum'] - parameters.sum()) / size
-
 
         # the Hann window is a discrete squared sine over one period
         elif distribution == 'hann_window':
