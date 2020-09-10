@@ -765,6 +765,8 @@ class TriangularModel:
                 mean=kwargs['loc'],
                 sigma=kwargs['scale'],
                 size=size)
+            parameters += (kwargs['sum'] - parameters.sum()) / size
+
 
         # the Hann window is a discrete squared sine over one period
         elif distribution == 'hann_window':
@@ -830,8 +832,8 @@ class TriangularModel:
         tuning_random_state=2332, tuning_bf_scale=None, target_pref_tuning=0.5,
         tuning_add_noise=True, tuning_overall_scale=1., N=20,
         coupling_sparsity=0.5, coupling_distribution='symmetric_lognormal',
-        coupling_loc=-1, coupling_scale=0.5, coupling_random_state=2332, K=2,
-        snr=3, noise_structure='clusters', corr_cluster=0.2, corr_back=0.,
+        coupling_loc=-1, coupling_scale=0.5, coupling_random_state=2332, coupling_sum=0.,
+        K=2, snr=3, noise_structure='clusters', corr_cluster=0.2, corr_back=0.,
         corr_max=0.3, corr_min=0.0, L_corr=1, stim_distribution='uniform',
         stim_low=0, stim_high=1
     ):
@@ -863,6 +865,7 @@ class TriangularModel:
             'distribution': coupling_distribution,
             'loc': coupling_loc,
             'scale': coupling_scale,
+            'sum': coupling_sum,
             'random_state': coupling_random_state,
         }
         if noise_structure == 'clusters':
