@@ -4,6 +4,7 @@ from .TriangularModel import TriangularModel
 
 __all__ = ["EMSolver",
            "TCSolver",
-           "TriangularModel"]
+           "TriangularModel",
+           "ITSFASolver"]
 
 name = "neurobiases"
