@@ -58,11 +58,11 @@ def main(args):
         print('Broadcasted data.')
 
     # create hyperparameters
-    coupling_lambdas = np.logspace(np.log10(args.coupling_lower),
-                                   np.log10(args.coupling_upper),
+    coupling_lambdas = np.logspace(args.coupling_lower,
+                                   args.coupling_upper,
                                    num=args.n_coupling)
-    tuning_lambdas = np.logspace(np.log10(args.tuning_lower),
-                                 np.log10(args.tuning_upper),
+    tuning_lambdas = np.logspace(args.tuning_lower,
+                                 args.tuning_upper,
                                  num=args.n_tuning)
     Ks = np.arange(args.max_K) + 1
 
@@ -87,11 +87,11 @@ if __name__ == '__main__':
     parser.add_argument('--M', type=int, default=10)
     parser.add_argument('--K', type=int, default=1)
     parser.add_argument('--D', type=int, default=1000)
-    parser.add_argument('--coupling_lower', type=float, default=1e-5)
-    parser.add_argument('--coupling_upper', type=float, default=1e-2)
+    parser.add_argument('--coupling_lower', type=float, default=-5)
+    parser.add_argument('--coupling_upper', type=float, default=-2)
     parser.add_argument('--n_coupling', type=int, default=5)
-    parser.add_argument('--tuning_lower', type=float, default=1e-5)
-    parser.add_argument('--tuning_upper', type=float, default=1e-2)
+    parser.add_argument('--tuning_lower', type=float, default=-5)
+    parser.add_argument('--tuning_upper', type=float, default=-2)
     parser.add_argument('--n_tuning', type=int, default=5)
     parser.add_argument('--max_K', type=int, default=1)
     parser.add_argument('--cv', type=int, default=3)
