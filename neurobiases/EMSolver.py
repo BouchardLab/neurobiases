@@ -4,7 +4,7 @@ import torch
 from .lbfgs import fmin_lbfgs
 from neurobiases import plot
 from neurobiases import solver_utils as utils
-from neurobiases.utils import inv_softplus
+from neurobiases.utils import inv_softplus, softplus
 from scipy.optimize import minimize
 from sklearn.utils import check_random_state
 
@@ -333,7 +333,7 @@ class EMSolver():
         if y is None:
             y = self.y
 
-        Psi = np.logaddexp(0, self.Psi_tr)
+        Psi = softplus(self.Psi_tr)
         mll = utils.marginal_log_likelihood_linear_tm(
             X=X, Y=Y, y=y, a=self.a, b=self.b, B=self.B, L=self.L,
             Psi=Psi, a_mask=self.a_mask, b_mask=self.b_mask,
@@ -408,7 +408,7 @@ class EMSolver():
         B = self.B * self.B_mask
 
         # private variances
-        Psi = np.logaddexp(0, self.Psi_tr)
+        Psi = softplus(self.Psi_tr)
         Psi_t, Psi_negt = np.split(Psi, [1])
 
         # interaction terms
@@ -669,7 +669,7 @@ class EMSolver():
         l_t = self.L[:, 0][..., np.newaxis]
         L_nt = self.L[:, 1:]
         # grab private variances
-        Psi = np.logaddexp(0, self.Psi_tr)
+        Psi = softplus(self.Psi_tr)
         Psi_t = Psi[0]
         Psi_nt = np.diag(Psi[1:])
 
@@ -718,7 +718,7 @@ class EMSolver():
         l_t = self.L[:, 0][..., np.newaxis]
         L_nt = self.L[:, 1:]
         # grab private variances
-        Psi = np.logaddexp(0, self.Psi_tr)
+        Psi = softplus(self.Psi_tr)
         Psi_t = Psi[0]
         Psi_nt = np.diag(Psi[1:])
 
@@ -764,7 +764,7 @@ class EMSolver():
         # latent factors
         L_nt = self.L[:, 1:]
         # grab private variances
-        Psi = np.logaddexp(0, self.Psi_tr)
+        Psi = softplus(self.Psi_tr)
         Psi_nt = np.diag(Psi[1:])
 
         optimize = minimize(
@@ -779,7 +779,7 @@ class EMSolver():
 
     def create_cov(self):
         """Calculate the covariance matrix of the noise terms."""
-        Psi = np.logaddexp(0, self.Psi_tr)
+        Psi = softplus(self.Psi_tr)
         cov = np.dot(self.L.T, self.L) + np.diag(Psi)
         return cov
 
@@ -793,7 +793,7 @@ class EMSolver():
     def calculate_private_shared_ratio(self):
         """Calculate the ratio of private variance to shared variance, for all
         neurons."""
-        return np.logaddexp(0, self.Psi_tr) / np.diag(np.dot(self.L.T, self.L))
+        return softplus(self.Psi_tr) / np.diag(np.dot(self.L.T, self.L))
 
     def plot_tc_fits(self, tm, fax=None, color='black', edgecolor='white'):
         """Scatters estimated tuning and coupling fits against ground truth
@@ -855,7 +855,7 @@ class EMSolver():
         B_true = tm.B
         L_hat = self.L
         L_true = tm.L
-        Psi_hat = np.logaddexp(0, self.Psi_tr)
+        Psi_hat = softplus(self.Psi_tr)
         Psi_true = tm.Psi
 
         fig, axes = plot.plot_tm_fits(
@@ -1335,7 +1335,7 @@ class EMSolver():
         # unravel coupling terms for easy products
         a = a.ravel()
         # private variances
-        Psi = np.logaddexp(0, Psi_tr)
+        Psi = softplus(Psi_tr)
         Psi_t = Psi[0]
         Psi_nt = Psi[1:]
         # bases
