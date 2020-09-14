@@ -63,7 +63,7 @@ def inv_softplus(x, cap=100):
     """
     # Note: there are still cases with {underflow in exp & invalid in log}
     # when input value v = x[i] is too small; in orders like v < (10 ** -15)
-    y = x
+    y = np.copy(x)
     mask = (x < cap)
     y[mask] = np.log(np.exp(x[mask]) - 1)
     return y
@@ -85,7 +85,7 @@ def softplus(x, cap=100):
     y : np.ndarray
         The softplus of the input.
     """
-    y = x
+    y = np.copy(x)
     mask = (x < cap)
     y[mask] = np.log(np.exp(x[mask]) + 1)
     return y
