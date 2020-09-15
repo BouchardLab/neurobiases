@@ -64,8 +64,12 @@ class EMSolver():
         self.solver = solver
         self.max_iter = max_iter
         self.tol = tol
-        self.c_coupling = c_coupling
-        self.c_tuning = c_tuning
+        if solver == 'scipy_lbfgs':
+            self.c_coupling = 0
+            self.c_tuning = 0
+        else:
+            self.c_coupling = c_coupling
+            self.c_tuning = c_tuning
         self.random_state = check_random_state(random_state)
 
         # initialize parameter estimates
@@ -464,8 +468,8 @@ class EMSolver():
                         'Expected complete log-likelihood:',
                         self.expected_complete_ll(params, self.X, self.Y, self.y,
                                                   mu, zz, sigma,
-                                                  c_coupling=self.c_coupling,
-                                                  c_tuning=self.c_tuning)
+                                                  c_coupling=0.,
+                                                  c_tuning=0.)
                     )
             else:
                 callback = None
@@ -490,8 +494,7 @@ class EMSolver():
                         'Expected complete log-likelihood:',
                         self.expected_complete_ll(x, self.X, self.Y, self.y,
                                                   mu, zz, sigma,
-                                                  c_coupling=self.c_coupling,
-                                                  c_tuning=self.c_tuning)
+                                                  tuning_to_coupling_ratio)
                     )
             else:
                 progress = None
@@ -1111,7 +1114,6 @@ class EMSolver():
         term6 = -2 * torch.sum(Y_residual * muL / Psi_nt.t()) / D
         term7a = torch.trace(torch.chain_matmul(L_nt, L_nt.t() / Psi_nt, sigma))
         term7b = torch.sum(muL**2 / Psi_nt.t()) / D
-
         # calculate loss and perform autograd
         loss = term1 + term2 + term3 + term4 + term5 + term6 + term7a + term7b
         loss.backward()
@@ -1372,15 +1374,10 @@ class EMSolver():
         N = Y.shape[1]
         K = mu.shape[1]
 
-
         # extract parameters
         tparams = torch.tensor(params, requires_grad=False)
-        a = tparams[:N].reshape(N, 1)
-        b = tparams[N:(N + M)].reshape(M, 1)
-        B = tparams[(N + M):(N + M + N * M)].reshape(M, N)
-        Psi_tr = tparams[(N + M + N * M):(N + M + N * M + N + 1)].reshape(N + 1, 1)
-        L = tparams[(N + M + N * M + N + 1):].reshape(K, N + 1)
-
+        a, b, B, Psi_tr, L = EMSolver.split_tparams(tparams, N, M, K)
+        # split up terms into target/non-target components
         Psi = torch.logaddexp(torch.tensor(0, dtype=Psi_tr.dtype), Psi_tr)
         Psi_nt = Psi[1:]
         l_t = L[:, 0].reshape(K, 1)
@@ -1405,7 +1402,7 @@ class EMSolver():
         term4 = torch.mean(
             torch.matmul(torch.transpose(torch.matmul(zz, l_t), 1, 2), l_t)) / Psi[0]
         term5 = torch.sum(Y_residual**2 / Psi_nt.t()) / D
-        term6 = -2 * torch.sum(y_residual * muL / Psi_nt.t()) / D
+        term6 = -2 * torch.sum(Y_residual * muL / Psi_nt.t()) / D
         term7a = torch.trace(torch.chain_matmul(L_nt, L_nt.t() / Psi_nt, sigma))
         term7b = torch.sum(muL**2 / Psi_nt.t()) / D
 
