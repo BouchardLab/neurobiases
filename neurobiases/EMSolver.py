@@ -49,7 +49,7 @@ class EMSolver():
     def __init__(
         self, X, Y, y, K, a_mask=None, b_mask=None, B_mask=None,
         B=None, L_nt=None, L=None, Psi_nt=None, Psi=None,
-        solver='scipy_lbfgs', max_iter=1000, tol=1e-4, c_tuning=1., c_coupling=1.,
+        solver='scipy_lbfgs', max_iter=1000, tol=1e-4, c_tuning=0., c_coupling=0.,
         random_state=None
     ):
         # tuning and coupling design matrices
@@ -463,7 +463,9 @@ class EMSolver():
                     print(
                         'Expected complete log-likelihood:',
                         self.expected_complete_ll(params, self.X, self.Y, self.y,
-                                                  mu, zz, sigma)
+                                                  mu, zz, sigma,
+                                                  c_coupling=self.c_coupling,
+                                                  c_tuning=self.c_tuning)
                     )
             else:
                 callback = None
@@ -487,7 +489,9 @@ class EMSolver():
                     print(
                         'Expected complete log-likelihood:',
                         self.expected_complete_ll(x, self.X, self.Y, self.y,
-                                                  mu, zz, sigma)
+                                                  mu, zz, sigma,
+                                                  c_coupling=self.c_coupling,
+                                                  c_tuning=self.c_tuning)
                     )
             else:
                 progress = None
@@ -1360,11 +1364,14 @@ class EMSolver():
         return ll
 
     @staticmethod
-    def expected_complete_ll(params, X, Y, y, mu, zz, sigma):
+    def expected_complete_ll(
+        params, X, Y, y, mu, zz, sigma, c_coupling=0., c_tuning=0.
+    ):
         """Calculate the expected complete log-likelihood."""
         D, M = X.shape
         N = Y.shape[1]
         K = mu.shape[1]
+
 
         # extract parameters
         tparams = torch.tensor(params, requires_grad=False)
@@ -1403,5 +1410,7 @@ class EMSolver():
         term7b = torch.sum(muL**2 / Psi_nt.t()) / D
 
         loss = term1 + term2 + term3 + term4 + term5 + term6 + term7a + term7b
-
+        # add sparsity penalty
+        loss += c_coupling * torch.norm(a, p=1) + \
+                c_tuning * (torch.norm(b, p=1) + torch.norm(B, p=1))
         return loss.detach().numpy()
