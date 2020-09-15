@@ -767,7 +767,8 @@ class TriangularModel:
                 mean=kwargs['loc'],
                 sigma=kwargs['scale'],
                 size=size)
-            parameters += (kwargs['sum'] - parameters.sum()) / size
+            if kwargs['sum'] is not None:
+                parameters += (kwargs['sum'] - parameters.sum()) / size
 
         # the Hann window is a discrete squared sine over one period
         elif distribution == 'hann_window':
