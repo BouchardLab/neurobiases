@@ -1339,7 +1339,7 @@ class EMSolver():
         # unravel coupling terms for easy products
         a = a.ravel()
         # private variances
-        Psi = np.logaddexp(0, Psi_tr)
+        Psi = np.logaddexp(0., Psi_tr)
         Psi_t = Psi[0]
         Psi_nt = Psi[1:]
         # bases

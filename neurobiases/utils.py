@@ -45,20 +45,50 @@ def sigmoid(x, phase=0, b=1):
     return 1./(1 + np.exp(-b * (x - phase)))
 
 
-def inv_softplus(x):
-    """Calculates the inverse softplus function.
+def inv_softplus(x, cap=100):
+    """Calculates the inverse softplus function log(exp(x) - 1).
 
     Parameters
     ----------
     x : np.ndarray
         Input array.
+    cap: float
+        A large enough number such that for each value v > cap, we approximate
+        inv_softmax(v) = v. Helps avoid overflow errors with exp(v).
 
     Returns
     -------
     inv_softplus : np.ndarray
         The inverse softplus of the input.
     """
-    return np.log(np.exp(x) - 1)
+    # Note: there are still cases with {underflow in exp & invalid in log}
+    # when input value v = x[i] is too small; in orders like v < (10 ** -15)
+    y = np.copy(x)
+    mask = (x < cap)
+    y[mask] = np.log(np.exp(x[mask]) - 1)
+    return y
+
+
+def softplus(x, cap=100):
+    """Calculates the softplus function log(1 + exp(x)).
+
+    Parameters
+    ----------
+    x : np.ndarray
+        Input array.
+    cap: float
+        A large enough number such that for each value v > cap, we approximate
+        softmax(v) = v. Helps avoid overflow errors with exp(v).
+
+    Returns
+    -------
+    y : np.ndarray
+        The softplus of the input.
+    """
+    y = np.copy(x)
+    mask = (x < cap)
+    y[mask] = np.log(np.exp(x[mask]) + 1)
+    return y
 
 
 def bf_mean(center, scale, limits=(0, 1)):
