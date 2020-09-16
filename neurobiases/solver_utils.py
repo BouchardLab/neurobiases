@@ -1,6 +1,8 @@
 import numpy as np
+import torch
 
 from . import EMSolver
+from .utils import inv_softplus
 from sklearn.model_selection import check_cv
 from sklearn.utils.extmath import cartesian
 
@@ -96,6 +98,70 @@ def marginal_log_likelihood_linear_tm(
     ll = -D / 2. * np.linalg.slogdet(sigma)[1] \
         + -0.5 * np.sum(residual.T * np.linalg.solve(sigma, residual.T))
     return ll
+
+
+def Psi_tr_to_Psi(Psi_tr, transform):
+    """Takes transformed Psi back to Psi.
+
+    Parameters
+    ----------
+    Psi_tr : np.ndarray
+        Transfored Psi.
+
+    Returns
+    -------
+    Psi : np.ndarray
+        The original Psi.
+    """
+    if transform == 'softplus':
+        if isinstance(Psi_tr, np.ndarray):
+            Psi = np.logaddexp(0., Psi_tr)
+        elif isinstance(Psi_tr, torch.Tensor):
+            Psi = torch.logaddexp(torch.tensor(0, dtype=Psi_tr.dtype), Psi_tr)
+        else:
+            raise ValueError('Invalid type for Psi transform.')
+    elif transform == 'exp':
+        if isinstance(Psi_tr, np.ndarray):
+            Psi = np.exp(Psi_tr)
+        elif isinstance(Psi_tr, torch.Tensor):
+            Psi = torch.log(Psi_tr)
+        else:
+            raise ValueError('Invalid type for Psi transform.')
+    else:
+        raise ValueError('Invalid Psi transform.')
+    return Psi
+
+
+def Psi_to_Psi_tr(Psi, transform):
+    """Takes Psi to the transformed Psi.
+
+    Parameters
+    ----------
+    Psi : np.ndarray
+        The original Psi.
+
+    Returns
+    -------
+    Psi_tr : np.ndarray
+        Transfored Psi.
+    """
+    if transform == 'softplus':
+        if isinstance(Psi, np.ndarray):
+            Psi_tr = inv_softplus(Psi)
+        elif isinstance(Psi, torch.Tensor):
+            Psi_tr = Psi + torch.log(1 - torch.exp(-Psi))
+        else:
+            raise ValueError('Invalid type for Psi transform.')
+    elif transform == 'exp':
+        if isinstance(Psi, np.ndarray):
+            Psi_tr = np.log(Psi)
+        elif isinstance(Psi, torch.Tensor):
+            Psi_tr = torch.log(Psi)
+        else:
+            raise ValueError('Invalid type for Psi transform.')
+    else:
+        raise ValueError('Invalid Psi transform.')
+    return Psi_tr
 
 
 def marginal_log_likelihood_linear_tm_wrapper(X, Y, y, tm):

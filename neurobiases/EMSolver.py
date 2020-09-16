@@ -4,7 +4,6 @@ import torch
 from .lbfgs import fmin_lbfgs
 from neurobiases import plot
 from neurobiases import solver_utils as utils
-from neurobiases.utils import inv_softplus
 from scipy.optimize import minimize
 from sklearn.utils import check_random_state
 
@@ -48,7 +47,7 @@ class EMSolver():
     """
     def __init__(
         self, X, Y, y, K, a_mask=None, b_mask=None, B_mask=None,
-        B=None, L_nt=None, L=None, Psi_nt=None, Psi=None,
+        B=None, L_nt=None, L=None, Psi_nt=None, Psi=None, Psi_transform='softplus',
         solver='scipy_lbfgs', max_iter=1000, tol=1e-4, c_tuning=0., c_coupling=0.,
         random_state=None
     ):
@@ -61,6 +60,7 @@ class EMSolver():
         self.K = K
 
         # optimization parameters
+        self.Psi_transform = Psi_transform
         self.solver = solver
         self.max_iter = max_iter
         self.tol = tol
@@ -204,14 +204,14 @@ class EMSolver():
             self.train_L = True
         # initialize all non-target private variances
         if Psi_nt is not None:
-            self.Psi_tr_nt_init = inv_softplus(Psi_nt)
+            self.Psi_tr_nt_init = self.Psi_to_Psi_tr(Psi_nt)
             self.Psi_tr[1:] = np.copy(self.Psi_tr_nt_init)
             self.train_Psi_tr_nt = False
         else:
             self.train_Psi_tr_nt = True
         # initialize all private variances
         if Psi is not None:
-            self.Psi_tr_init = inv_softplus(Psi)
+            self.Psi_tr_init = self.Psi_to_Psi_tr(Psi)
             self.Psi_tr = np.copy(self.Psi_tr_init)
             self.train_Psi_tr = False
         else:
@@ -309,6 +309,36 @@ class EMSolver():
                         Psi_tr=self.Psi_tr, L=self.L)
         return copy
 
+    def Psi_tr_to_Psi(self, Psi_tr):
+        """Takes transformed Psi back to Psi.
+
+        Parameters
+        ----------
+        Psi_tr : np.ndarray
+            Transfored Psi.
+
+        Returns
+        -------
+        Psi : np.ndarray
+            The original Psi.
+        """
+        return utils.Psi_tr_to_Psi(Psi_tr, self.Psi_transform)
+
+    def Psi_to_Psi_tr(self, Psi):
+        """Takes Psi to the transformed Psi.
+
+        Parameters
+        ----------
+        Psi : np.ndarray
+            The original Psi.
+
+        Returns
+        -------
+        Psi_tr : np.ndarray
+            Transfored Psi.
+        """
+        return utils.Psi_to_Psi_tr(Psi, self.Psi_transform)
+
     def marginal_log_likelihood(self, X=None, Y=None, y=None):
         """Calculates the marginal likelihood of the neural activities given
         the stimulus and current parameter estimates. Can optionally accept
@@ -337,7 +367,7 @@ class EMSolver():
         if y is None:
             y = self.y
 
-        Psi = np.logaddexp(0, self.Psi_tr)
+        Psi = self.Psi_to_Psi_tr(self.Psi_tr)
         mll = utils.marginal_log_likelihood_linear_tm(
             X=X, Y=Y, y=y, a=self.a, b=self.b, B=self.B, L=self.L,
             Psi=Psi, a_mask=self.a_mask, b_mask=self.b_mask,
@@ -351,9 +381,10 @@ class EMSolver():
         n_params = params.size
         tparams = torch.tensor(params, requires_grad=True)
         a, b, B, Psi_tr, L = EMSolver.split_tparams(
-            tparams, self.N, self.M, self.K)
+            tparams, self.N, self.M, self.K
+        )
 
-        Psi = torch.logaddexp(torch.tensor(0, dtype=Psi_tr.dtype), Psi_tr)
+        Psi = self.Psi_tr_to_Psi(self.Psi_tr)
         Psi_t = Psi[0]
         Psi_nt = Psi[1:].reshape(self.N, 1)  # N x 1
         l_t = L[:, 0].reshape(self.K, 1)  # K x 1
@@ -412,7 +443,7 @@ class EMSolver():
         B = self.B * self.B_mask
 
         # private variances
-        Psi = np.logaddexp(0, self.Psi_tr)
+        Psi = self.Psi_tr_to_Psi(self.Psi_tr)
         Psi_t, Psi_negt = np.split(Psi, [1])
 
         # interaction terms
@@ -474,7 +505,8 @@ class EMSolver():
                                                   a_mask=self.a_mask,
                                                   b_mask=self.b_mask,
                                                   B_mask=self.B_mask,
-                                                  transform_tuning=False)
+                                                  transform_tuning=False,
+                                                  Psi_transform=self.Psi_transform)
                     )
             else:
                 callback = None
@@ -483,7 +515,7 @@ class EMSolver():
                 method='L-BFGS-B',
                 args=(self.X, self.Y, self.y, self.a_mask, self.b_mask, self.B_mask,
                       self.train_B, self.train_L_nt, self.train_L, self.train_Psi_tr_nt,
-                      self.train_Psi_tr, mu, zz, sigma, 1.),
+                      self.train_Psi_tr, mu, zz, sigma, 1., self.Psi_transform),
                 callback=callback,
                 jac=True)
             # extract optimized parameters
@@ -505,7 +537,8 @@ class EMSolver():
                                                   a_mask=self.a_mask,
                                                   b_mask=self.b_mask,
                                                   B_mask=self.B_mask,
-                                                  transform_tuning=True)
+                                                  transform_tuning=True,
+                                                  Psi_transform=self.Psi_transform)
                     )
             else:
                 progress = None
@@ -542,7 +575,8 @@ class EMSolver():
                 self.f_df_em_owlbfgs, x0=params,
                 args=(self.X, self.Y, self.y, self.a_mask, self.b_mask, self.B_mask,
                       self.train_B, self.train_L_nt, self.train_L, self.train_Psi_tr_nt,
-                      self.train_Psi_tr, mu, zz, sigma, tuning_to_coupling_ratio),
+                      self.train_Psi_tr, mu, zz, sigma, tuning_to_coupling_ratio,
+                      self.Psi_transform),
                 progress=progress,
                 orthantwise_c=c,
                 orthantwise_start=orthantwise_start,
@@ -662,7 +696,7 @@ class EMSolver():
                 print('Marginal likelihood: ',
                       self.mll(params, self.X, self.Y, self.y,
                                self.K, self.a_mask, self.b_mask,
-                               self.B_mask))
+                               self.B_mask, self.Psi_transform))
         else:
             callback = None
 
@@ -672,7 +706,7 @@ class EMSolver():
             args=(self.X, self.Y, self.y, self.K,
                   self.a_mask, self.b_mask, self.B_mask,
                   self.train_B, self.train_L, self.train_L_nt,
-                  self.train_Psi_tr_nt, self.train_Psi_tr),
+                  self.train_Psi_tr_nt, self.train_Psi_tr, self.Psi_transform),
             callback=callback,
             jac=True)
         params = optimize.x
@@ -691,7 +725,7 @@ class EMSolver():
         l_t = self.L[:, 0][..., np.newaxis]
         L_nt = self.L[:, 1:]
         # grab private variances
-        Psi = np.logaddexp(0, self.Psi_tr)
+        Psi = self.Psi_tr_to_Psi(self.Psi_tr)
         Psi_t = Psi[0]
         Psi_nt = np.diag(Psi[1:])
 
@@ -712,7 +746,7 @@ class EMSolver():
             - np.dot(delta_aug.T, delta_aug) \
             - 2 * np.dot(L_aug.T, delta_aug)
 
-        self.Psi_tr[0] = inv_softplus(Psi_t + correction)
+        self.Psi_tr[0] = self.Psi_to_Psi_tr(Psi_t + correction)
         self.L[:, 0] = self.L[:, 0] + delta.ravel()
         self.a = self.a + Delta
         self.b = self.b - np.dot(self.B, Delta)
@@ -740,7 +774,7 @@ class EMSolver():
         l_t = self.L[:, 0][..., np.newaxis]
         L_nt = self.L[:, 1:]
         # grab private variances
-        Psi = np.logaddexp(0, self.Psi_tr)
+        Psi = self.Psi_tr_to_Psi(self.Psi_tr)
         Psi_t = Psi[0]
         Psi_nt = np.diag(Psi[1:])
 
@@ -786,7 +820,7 @@ class EMSolver():
         # latent factors
         L_nt = self.L[:, 1:]
         # grab private variances
-        Psi = np.logaddexp(0, self.Psi_tr)
+        Psi = self.Psi_tr_to_Psi(self.Psi_tr)
         Psi_nt = np.diag(Psi[1:])
 
         optimize = minimize(
@@ -801,7 +835,7 @@ class EMSolver():
 
     def create_cov(self):
         """Calculate the covariance matrix of the noise terms."""
-        Psi = np.logaddexp(0, self.Psi_tr)
+        Psi = self.Psi_tr_to_Psi(self.Psi_tr)
         cov = np.dot(self.L.T, self.L) + np.diag(Psi)
         return cov
 
@@ -815,7 +849,7 @@ class EMSolver():
     def calculate_private_shared_ratio(self):
         """Calculate the ratio of private variance to shared variance, for all
         neurons."""
-        return np.logaddexp(0, self.Psi_tr) / np.diag(np.dot(self.L.T, self.L))
+        return self.Psi_tr_to_Psi(self.Psi_tr) / np.diag(np.dot(self.L.T, self.L))
 
     def plot_tc_fits(self, tm, fax=None, color='black', edgecolor='white'):
         """Scatters estimated tuning and coupling fits against ground truth
@@ -877,7 +911,7 @@ class EMSolver():
         B_true = tm.B
         L_hat = self.L
         L_true = tm.L
-        Psi_hat = np.logaddexp(0, self.Psi_tr)
+        Psi_hat = self.Psi_tr_to_Psi(self.Psi_tr)
         Psi_true = tm.Psi
 
         fig, axes = plot.plot_tm_fits(
@@ -925,7 +959,7 @@ class EMSolver():
     @staticmethod
     def f_df_ml(
         params, X, Y, y, K, a_mask, b_mask, B_mask, train_B, train_L_nt, train_L,
-        train_Psi_tr_nt, train_Psi_tr
+        train_Psi_tr_nt, train_Psi_tr, Psi_transform='softplus'
     ):
         """Helper function for parameter fitting with maximum likelihood.
         Calculates the log-likelihood of the neural activity and gradients
@@ -977,7 +1011,7 @@ class EMSolver():
         b = b * torch.tensor(b_mask, dtype=b.dtype)
         B = B * torch.tensor(B_mask, dtype=B.dtype)
         # split up terms into target/non-target components
-        Psi = torch.logaddexp(torch.tensor(0, dtype=Psi_tr.dtype), Psi_tr)
+        Psi = utils.Psi_tr_to_Psi(Psi_tr, Psi_transform)
         Psi_t = Psi[0]
         Psi_nt = Psi[1:].reshape(N, 1)  # N x 1
         l_t = L[:, 0].reshape(K, 1)  # K x 1
@@ -1041,7 +1075,7 @@ class EMSolver():
     @staticmethod
     def f_df_em(params, X, Y, y, a_mask, b_mask, B_mask, train_B, train_L_nt,
                 train_L, train_Psi_tr_nt, train_Psi_tr, mu, zz, sigma,
-                tuning_to_coupling_ratio):
+                tuning_to_coupling_ratio, Psi_transform='softplus'):
         """Helper function for the M-step in the EM procedure. Calculates the
         expected complete log-likelihood and gradients with respect to all
         parameters.
@@ -1100,7 +1134,7 @@ class EMSolver():
         b = b / tuning_to_coupling_ratio
         B = B / tuning_to_coupling_ratio
         # split up terms into target/non-target components
-        Psi = torch.logaddexp(torch.tensor(0, dtype=Psi_tr.dtype), Psi_tr)
+        Psi = utils.Psi_tr_to_Psi(Psi_tr, Psi_transform)
         Psi_nt = Psi[1:]
         l_t = L[:, 0].reshape(K, 1)
         L_nt = L[:, 1:]
@@ -1331,7 +1365,7 @@ class EMSolver():
         return loss.detach().numpy(), grad
 
     @staticmethod
-    def mll(params, X, Y, y, K, a_mask, b_mask, B_mask):
+    def mll(params, X, Y, y, K, a_mask, b_mask, B_mask, Psi_transform='softplus'):
         """Calculate the marginal log-likelihood of the provided data."""
         # storage for joint mean and covariance matrices
         D, M = X.shape
@@ -1356,7 +1390,7 @@ class EMSolver():
         # unravel coupling terms for easy products
         a = a.ravel()
         # private variances
-        Psi = np.logaddexp(0., Psi_tr)
+        Psi = utils.Psi_tr_to_Psi(Psi_tr, Psi_transform)
         Psi_t = Psi[0]
         Psi_nt = Psi[1:]
         # bases
@@ -1383,7 +1417,7 @@ class EMSolver():
     @staticmethod
     def expected_complete_ll(
         params, X, Y, y, mu, zz, sigma, c_coupling=0., c_tuning=0., a_mask=None,
-        b_mask=None, B_mask=None, transform_tuning=False
+        b_mask=None, B_mask=None, transform_tuning=False, Psi_transform='softplus'
     ):
         """Calculate the expected complete log-likelihood."""
         D, M = X.shape
@@ -1399,7 +1433,7 @@ class EMSolver():
         L = params[(N + M + N * M + N + 1):].reshape((K, N + 1))
 
         # split up terms into target/non-target components
-        Psi = np.logaddexp(0., Psi_tr)
+        Psi = utils.Psi_tr_to_Psi(Psi_tr, Psi_transform)
         Psi_t, Psi_nt = np.split(Psi, [1])
         Psi_t = Psi_t.item()
         l_t, L_nt = np.split(L, [1], axis=1)
@@ -1449,5 +1483,5 @@ class EMSolver():
         loss = term1 + term2 + term3 + term4 + term5 + term6 + term7a + term7b
         # add sparsity penalty
         loss += c_coupling * np.linalg.norm(a, ord=1) + \
-                c_tuning * (np.linalg.norm(b, ord=1) + np.linalg.norm(B, ord=1))
+            c_tuning * (np.linalg.norm(b, ord=1) + np.linalg.norm(B, ord=1))
         return loss
