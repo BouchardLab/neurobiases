@@ -272,7 +272,7 @@ def cv_sparse_em_solver(
                 tol=tol,
                 c_tuning=c_tuning,
                 c_coupling=c_coupling).fit_em(
-                    verbose=True, 
+                    verbose=False,
                     mstep_verbose=False)
             # store parameter fits
             a[task_idx, split_idx] = emfit.a.ravel()
