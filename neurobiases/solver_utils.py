@@ -271,8 +271,9 @@ def cv_sparse_em_solver(
                 max_iter=max_iter,
                 tol=tol,
                 c_tuning=c_tuning,
-                c_coupling=c_coupling,
-                random_state=random_state).fit_em(verbose=False)
+                c_coupling=c_coupling).fit_em(
+                    verbose=True, 
+                    mstep_verbose=False)
             # store parameter fits
             a[task_idx, split_idx] = emfit.a.ravel()
             b[task_idx, split_idx] = emfit.b.ravel()
