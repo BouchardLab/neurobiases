@@ -456,6 +456,7 @@ class EMSolver():
         params : np.ndarray, shape (N + M + N * M + N + 1 + K * (N + 1),)
             A vector containing all parameters concatenated together.
         """
+        # grab params, default values
         params = self.get_params()
 
         # use scipy's lbfgs solver (can't handle sparsity)
@@ -469,7 +470,11 @@ class EMSolver():
                         self.expected_complete_ll(params, self.X, self.Y, self.y,
                                                   mu, zz, sigma,
                                                   c_coupling=0.,
-                                                  c_tuning=0.)
+                                                  c_tuning=0.,
+                                                  a_mask=self.a_mask,
+                                                  b_mask=self.b_mask,
+                                                  B_mask=self.B_mask,
+                                                  transform_tuning=False)
                     )
             else:
                 callback = None
@@ -490,11 +495,17 @@ class EMSolver():
             if verbose:
                 # create callback function
                 def progress(x, g, fx, xnorm, gnorm, step, k, num_eval, *args):
+                    # x is in the transformed space
                     print(
                         'Expected complete log-likelihood:',
                         self.expected_complete_ll(x, self.X, self.Y, self.y,
                                                   mu, zz, sigma,
-                                                  tuning_to_coupling_ratio)
+                                                  c_coupling=self.c_coupling,
+                                                  c_tuning=self.c_tuning,
+                                                  a_mask=self.a_mask,
+                                                  b_mask=self.b_mask,
+                                                  B_mask=self.B_mask,
+                                                  transform_tuning=True)
                     )
             else:
                 progress = None
@@ -505,6 +516,8 @@ class EMSolver():
                 orthantwise_end = self.N + self.M + self.N * self.M
                 tuning_to_coupling_ratio = float(self.c_tuning) / self.c_coupling
                 c = self.c_coupling
+                # transform tuning parameters
+                params[self.N:orthantwise_end] *= tuning_to_coupling_ratio
             # penalize only coupling
             elif self.c_tuning == 0 and self.c_coupling != 0:
                 orthantwise_start = 0
@@ -524,6 +537,7 @@ class EMSolver():
                 c = 0
                 tuning_to_coupling_ratio = 1.
 
+            # tuning params are transformed
             params = fmin_lbfgs(
                 self.f_df_em_owlbfgs, x0=params,
                 args=(self.X, self.Y, self.y, self.a_mask, self.b_mask, self.B_mask,
@@ -537,6 +551,7 @@ class EMSolver():
             a, b, B, Psi_tr, L = self.split_params(params)
             b = b / tuning_to_coupling_ratio
             B = B / tuning_to_coupling_ratio
+            # transform params back to original values
             params = np.concatenate((a.ravel(),
                                      b.ravel(),
                                      B.ravel(),
@@ -1367,7 +1382,8 @@ class EMSolver():
 
     @staticmethod
     def expected_complete_ll(
-        params, X, Y, y, mu, zz, sigma, c_coupling=0., c_tuning=0.
+        params, X, Y, y, mu, zz, sigma, c_coupling=0., c_tuning=0., a_mask=None,
+        b_mask=None, B_mask=None, transform_tuning=False
     ):
         """Calculate the expected complete log-likelihood."""
         D, M = X.shape
@@ -1375,39 +1391,63 @@ class EMSolver():
         K = mu.shape[1]
 
         # extract parameters
-        tparams = torch.tensor(params, requires_grad=False)
-        a, b, B, Psi_tr, L = EMSolver.split_tparams(tparams, N, M, K)
+        a = params[:N]
+        b = params[N:(N + M)]
+        B = params[(N + M):(N + M + M * N)].reshape((M, N))
+        Psi_tr = params[(N + M + M * N):
+                        (N + M + M * N + N + 1)]
+        L = params[(N + M + N * M + N + 1):].reshape((K, N + 1))
+
         # split up terms into target/non-target components
-        Psi = torch.logaddexp(torch.tensor(0, dtype=Psi_tr.dtype), Psi_tr)
-        Psi_nt = Psi[1:]
-        l_t = L[:, 0].reshape(K, 1)
-        L_nt = L[:, 1:]
+        Psi = np.logaddexp(0., Psi_tr)
+        Psi_t, Psi_nt = np.split(Psi, [1])
+        Psi_t = Psi_t.item()
+        l_t, L_nt = np.split(L, [1], axis=1)
+        l_t = l_t.ravel()
 
-        # data
-        X = torch.tensor(X)
-        Y = torch.tensor(Y)
-        y = torch.tensor(y)
-        mu = torch.tensor(mu)
-        zz = torch.tensor(zz)
-        sigma = torch.tensor(sigma)
+        # check masks
+        if a_mask is None:
+            a_mask = np.ones(N)
+        elif a_mask.ndim == 2:
+            a_mask = a_mask.ravel()
 
-        y_residual = y - torch.mm(X, b) - torch.mm(Y, a)
-        Y_residual = Y - torch.mm(X, B)
+        if b_mask is None:
+            b_mask = np.ones(M)
+        elif b_mask.ndim == 2:
+            b_mask = np.ones(M)
 
-        muL = torch.mm(mu, L_nt)
+        if B_mask is None:
+            B_mask = np.ones_like(B_mask)
 
-        term1 = torch.sum(torch.log(Psi))
-        term2 = torch.mean(y_residual**2 / Psi[0])
-        term3 = torch.mean((-2. / Psi[0]) * y_residual * torch.mm(mu, l_t))
-        term4 = torch.mean(
-            torch.matmul(torch.transpose(torch.matmul(zz, l_t), 1, 2), l_t)) / Psi[0]
-        term5 = torch.sum(Y_residual**2 / Psi_nt.t()) / D
-        term6 = -2 * torch.sum(Y_residual * muL / Psi_nt.t()) / D
-        term7a = torch.trace(torch.chain_matmul(L_nt, L_nt.t() / Psi_nt, sigma))
-        term7b = torch.sum(muL**2 / Psi_nt.t()) / D
+        # apply masks
+        a = a.ravel() * a_mask
+        b = b.ravel() * b_mask
+        B = B * B_mask
+
+        # get original params if incoming are transformed
+        if transform_tuning:
+            tuning_to_coupling_ratio = c_tuning / c_coupling
+            b = b / tuning_to_coupling_ratio
+            B = B / tuning_to_coupling_ratio
+
+        y_residual = y.ravel() - X @ b - Y @ a
+        Y_residual = Y - X @ B
+
+        muL = mu @ L_nt
+
+        term1 = np.sum(np.log(Psi))
+        term2 = np.mean(y_residual**2 / Psi_t)
+        term3 = np.mean((-2. / Psi_t) * y_residual * (mu @ l_t))
+        term4 = (1. / Psi_t) * np.mean(
+            np.matmul(np.matmul(zz, l_t), l_t)
+        )
+        term5 = np.sum(Y_residual**2 / Psi_nt.T) / D
+        term6 = -2 * np.sum(Y_residual * muL / Psi_nt.T) / D
+        term7a = np.trace(L_nt @ (L_nt.T / Psi_nt[..., np.newaxis]) @ sigma)
+        term7b = np.sum(muL**2 / Psi_nt.T) / D
 
         loss = term1 + term2 + term3 + term4 + term5 + term6 + term7a + term7b
         # add sparsity penalty
-        loss += c_coupling * torch.norm(a, p=1) + \
-                c_tuning * (torch.norm(b, p=1) + torch.norm(B, p=1))
-        return loss.detach().numpy()
+        loss += c_coupling * np.linalg.norm(a, ord=1) + \
+                c_tuning * (np.linalg.norm(b, ord=1) + np.linalg.norm(B, ord=1))
+        return loss
