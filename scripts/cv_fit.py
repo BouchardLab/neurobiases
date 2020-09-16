@@ -31,7 +31,7 @@ def main(args):
     tuning_kwargs, coupling_kwargs, noise_kwargs, stim_kwargs = \
         TriangularModel.generate_kwargs(
             parameter_design='direct_response',
-            M=M, N=N, K=K, corr_cluster=0.4, corr_back=0.1,
+            M=M, N=N, K=K, corr_cluster=0.4, corr_back=0.1, coupling_sum=None,
             tuning_sparsity=0.5, coupling_sparsity=0.5,
             tuning_random_state=random_state, coupling_random_state=random_state)
     # generate triangular model
@@ -68,6 +68,7 @@ def main(args):
 
     scores, a, b, B, Psi_tr = cv_sparse_em_solver(
         X=X, Y=Y, y=y,
+        solver='ow_lbfgs',
         coupling_lambdas=coupling_lambdas, tuning_lambdas=tuning_lambdas, Ks=Ks,
         cv=args.cv, max_iter=args.max_iter, tol=args.tol, comm=comm,
         verbose=True
