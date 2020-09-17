@@ -367,7 +367,7 @@ class EMSolver():
         if y is None:
             y = self.y
 
-        Psi = self.Psi_to_Psi_tr(self.Psi_tr)
+        Psi = self.Psi_tr_to_Psi(self.Psi_tr)
         mll = utils.marginal_log_likelihood_linear_tm(
             X=X, Y=Y, y=y, a=self.a, b=self.b, B=self.B, L=self.L,
             Psi=Psi, a_mask=self.a_mask, b_mask=self.b_mask,
