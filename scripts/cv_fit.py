@@ -96,8 +96,8 @@ if __name__ == '__main__':
     parser.add_argument('--n_tuning', type=int, default=5)
     parser.add_argument('--max_K', type=int, default=1)
     parser.add_argument('--cv', type=int, default=3)
-    parser.add_argument('--max_iter', type=int, default=100)
-    parser.add_argument('--tol', type=float, default=1e-4)
+    parser.add_argument('--max_iter', type=int, default=500)
+    parser.add_argument('--tol', type=float, default=1e-8)
     parser.add_argument('--random_state', type=int, default=2332)
     args = parser.parse_args()
 
