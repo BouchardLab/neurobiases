@@ -71,7 +71,8 @@ def main(args):
         solver='ow_lbfgs',
         coupling_lambdas=coupling_lambdas, tuning_lambdas=tuning_lambdas, Ks=Ks,
         cv=args.cv, max_iter=args.max_iter, tol=args.tol, comm=comm,
-        verbose=True
+        cv_verbose=args.cv_verbose, em_verbose=args.em_verbose,
+        mstep_verbose=args.mstep_verbose
     )
     if rank == 0:
         np.savez(save_path, scores=scores, a=a, b=b, B=B, Psi_tr=Psi_tr)
@@ -99,6 +100,9 @@ if __name__ == '__main__':
     parser.add_argument('--max_iter', type=int, default=500)
     parser.add_argument('--tol', type=float, default=1e-8)
     parser.add_argument('--random_state', type=int, default=2332)
+    parser.add_argument('--cv_verbose', action='store_true')
+    parser.add_argument('--em_verbose', action='store_true')
+    parser.add_argument('--mstep_verbose', action='store_true')
     args = parser.parse_args()
 
     main(args)
