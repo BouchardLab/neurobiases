@@ -309,7 +309,7 @@ class EMSolver():
                         Psi_tr=self.Psi_tr, L=self.L)
         return copy
 
-    def Psi_tr_to_Psi(self, Psi_tr):
+    def Psi_tr_to_Psi(self, Psi_tr=None):
         """Takes transformed Psi back to Psi.
 
         Parameters
@@ -322,6 +322,8 @@ class EMSolver():
         Psi : np.ndarray
             The original Psi.
         """
+        if Psi_tr is None:
+            Psi_tr = self.Psi_tr
         return utils.Psi_tr_to_Psi(Psi_tr, self.Psi_transform)
 
     def Psi_to_Psi_tr(self, Psi):
