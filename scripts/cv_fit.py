@@ -14,7 +14,11 @@ def main(args):
     K = args.K
     D = args.D
     save_path = args.save_path
-    random_state = args.random_state
+    tm_random_state = args.tm_random_state
+    if args.em_random_state == -1:
+        em_random_state = None
+    else:
+        em_random_state = args.em_random_state
 
     # MPI communicator
     comm = MPI.COMM_WORLD
@@ -33,7 +37,7 @@ def main(args):
             parameter_design='direct_response',
             M=M, N=N, K=K, corr_cluster=0.4, corr_back=0.1, coupling_sum=None,
             tuning_sparsity=0.5, coupling_sparsity=0.5,
-            tuning_random_state=random_state, coupling_random_state=random_state)
+            tuning_random_state=tm_random_state, coupling_random_state=tm_random_state)
     # generate triangular model
     tm = TriangularModel(
         model='linear',
@@ -48,7 +52,7 @@ def main(args):
     y = None
     # generate samples
     if rank == 0:
-        X, Y, y = tm.generate_samples(n_samples=D, random_state=random_state)
+        X, Y, y = tm.generate_samples(n_samples=D, random_state=tm_random_state)
 
     X = Bcast_from_root(X, comm)
     Y = Bcast_from_root(Y, comm)
@@ -66,24 +70,37 @@ def main(args):
                                  num=args.n_tuning)
     Ks = np.arange(args.max_K) + 1
 
-    scores, a, b, B, Psi_tr = cv_sparse_em_solver(
+    scores, a, b, B, Psi_tr, L = cv_sparse_em_solver(
         X=X, Y=Y, y=y,
         solver='ow_lbfgs',
         coupling_lambdas=coupling_lambdas, tuning_lambdas=tuning_lambdas, Ks=Ks,
         cv=args.cv, max_iter=args.max_iter, tol=args.tol, comm=comm,
         cv_verbose=args.cv_verbose, em_verbose=args.em_verbose,
-        mstep_verbose=args.mstep_verbose
+        mstep_verbose=args.mstep_verbose,
+        random_state=em_random_state
     )
     if rank == 0:
-        np.savez(save_path, scores=scores, a=a, b=b, B=B, Psi_tr=Psi_tr)
+        np.savez(save_path,
+                 scores=scores,
+                 a_est=a,
+                 a_true=tm.a.ravel(),
+                 b_est=b,
+                 b_true=tm.b.ravel(),
+                 B_est=B,
+                 B_true=tm.B.ravel(),
+                 Psi_tr_est=Psi_tr,
+                 Psi_tr_true=tm.Psi_tr,
+                 L_est=L,
+                 L_true=tm.L)
         print('Successfully Saved.')
         t2 = time.time()
         print('Job complete. Total time: ', t2 - t0)
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Run noise correlations analysis.')
-    parser.add_argument('--save_path', type=str,
+    parser = argparse.ArgumentParser(description='Run CV solver on triangular model.')
+    parser.add_argument('--save_path',
+                        type=str,
                         help='Path where results will be saved.')
     parser.add_argument('--N', type=int, default=15)
     parser.add_argument('--M', type=int, default=10)
@@ -99,7 +116,8 @@ if __name__ == '__main__':
     parser.add_argument('--cv', type=int, default=3)
     parser.add_argument('--max_iter', type=int, default=500)
     parser.add_argument('--tol', type=float, default=1e-8)
-    parser.add_argument('--random_state', type=int, default=2332)
+    parser.add_argument('--tm_random_state', type=int, default=2332)
+    parser.add_argument('--em_random_state', type=int, default=-1)
     parser.add_argument('--cv_verbose', action='store_true')
     parser.add_argument('--em_verbose', action='store_true')
     parser.add_argument('--mstep_verbose', action='store_true')
