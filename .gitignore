@@ -1,3 +1,6 @@
+# neurobiases specific
+neurobiases/lbfgs/_lowlevel.c
+
 # data files
 *.h5
 *.npz
