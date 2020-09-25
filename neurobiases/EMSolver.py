@@ -684,7 +684,7 @@ class EMSolver():
                     sparsity_statement = \
                         f'Coupling SR = {coupling_sr:0.3f}, Tuning SR = {tuning_sr:0.3f}'
                     print(sparsity_statement)
-
+        self.n_iterations = iteration + 1
         if mll_curve:
             return mlls[:iteration]
         else:

@@ -314,6 +314,7 @@ def cv_sparse_em_solver(
     B = np.zeros((n_tasks, n_splits, M, N))
     Psi = np.zeros((n_tasks, n_splits, N + 1))
     L = np.zeros((n_tasks, n_splits, Ks.max(), N + 1))
+    n_iterations = np.zeros((n_tasks, n_splits))
 
     for split_idx, (train_idx, test_idx) in enumerate(cv.split(X, y)):
         # get training set
@@ -348,6 +349,7 @@ def cv_sparse_em_solver(
             B[task_idx, split_idx] = emfit.B
             Psi[task_idx, split_idx] = emfit.Psi_tr_to_Psi()
             L[task_idx, split_idx, :int(K), :] = emfit.L
+            n_iterations[task_idx, split_idx] = emfit.n_iterations
             # score the resulting fit
             scores[task_idx, split_idx] = emfit.marginal_log_likelihood(
                 X=X_test, Y=Y_test, y=y_test
@@ -359,4 +361,4 @@ def cv_sparse_em_solver(
         B = Gatherv_rows(B, comm)
         Psi = Gatherv_rows(Psi, comm)
         L = Gatherv_rows(L, comm)
-    return scores, a, b, B, Psi, L
+    return scores, a, b, B, Psi, L, n_iterations

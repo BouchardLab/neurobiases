@@ -70,7 +70,7 @@ def main(args):
                                  num=args.n_tuning)
     Ks = np.arange(args.max_K) + 1
 
-    scores, a, b, B, Psi, L = cv_sparse_em_solver(
+    scores, a, b, B, Psi, L, n_iterations = cv_sparse_em_solver(
         X=X, Y=Y, y=y,
         solver='ow_lbfgs',
         coupling_lambdas=coupling_lambdas, tuning_lambdas=tuning_lambdas, Ks=Ks,
@@ -91,7 +91,9 @@ def main(args):
                  Psi_est=Psi,
                  Psi_true=tm.Psi,
                  L_est=L,
-                 L_true=tm.L)
+                 L_true=tm.L,
+                 X=X, Y=Y, y=y,
+                 n_iterations=n_iterations)
         print('Successfully Saved.')
         t2 = time.time()
         print('Job complete. Total time: ', t2 - t0)
