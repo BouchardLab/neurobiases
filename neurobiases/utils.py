@@ -91,6 +91,26 @@ def softplus(x, cap=100):
     return y
 
 
+def selection_accuracy(mask1, mask2):
+    """Calculates the selection accuracy (set overlap).
+
+    Parameters
+    ----------
+    mask1, mask2 : np.ndarray
+        Selection profiles as numpy arrays of coefficients or masks.
+
+    Returns
+    -------
+    selection_accuracy : float
+        The selection accuracy.
+    """
+    idx1 = np.argwhere(mask1 != 0).ravel()
+    idx2 = np.argwhere(mask2 != 0).ravel()
+    difference = np.setdiff1d(idx1, idx2).size + np.setdiff1d(idx2, idx1).size
+    selection_accuracy = 1 - difference / (idx1.size + idx2.size)
+    return selection_accuracy
+
+
 def bf_mean(center, scale, limits=(0, 1)):
     """Calculates the mean of a Gaussian basis function feature where the
     input behaves as a uniform distribution.
