@@ -99,9 +99,7 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run CV solver on triangular model.')
-    parser.add_argument('--save_path',
-                        type=str,
-                        help='Path where results will be saved.')
+    parser.add_argument('--save_path', type=str)
     parser.add_argument('--N', type=int, default=15)
     parser.add_argument('--M', type=int, default=10)
     parser.add_argument('--K', type=int, default=1)
