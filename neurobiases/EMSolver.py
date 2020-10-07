@@ -623,8 +623,10 @@ class EMSolver():
 
         return params
 
-    def fit_em(self, verbose=False, mstep_verbose=False, mll_curve=False,
-               sparsity_verbose=False, fista_max_iter=250, fista_lr=1e-6):
+    def fit_em(
+        self, refit=False, verbose=False, mstep_verbose=False, mll_curve=False,
+        sparsity_verbose=False, fista_max_iter=250, fista_lr=1e-6
+    ):
         """Fit the triangular model parameters using the EM algorithm.
 
         Parameters
@@ -685,10 +687,23 @@ class EMSolver():
                         f'Coupling SR = {coupling_sr:0.3f}, Tuning SR = {tuning_sr:0.3f}'
                     print(sparsity_statement)
         self.n_iterations = iteration + 1
-        if mll_curve:
-            return mlls[:iteration]
+
+        if refit:
+            a_mask = self.a.ravel() != 0
+            b_mask = self.b.ravel() != 0
+            B_mask = self.B != 0
+            self.set_masks(a_mask=a_mask, b_mask=b_mask, B_mask=B_mask)
+            if verbose:
+                print('Refitting EM estimates with new masks.')
+            return self.fit_em(
+                refit=False, verbose=verbose, mstep_verbose=mstep_verbose,
+                mll_curve=mll_curve, sparsity_verbose=sparsity_verbose,
+                fista_max_iter=fista_max_iter, fista_lr=fista_lr)
         else:
-            return self
+            if mll_curve:
+                return mlls[:iteration]
+            else:
+                return self
 
     def fit_ml(self, verbose=False):
         """Fit the parameters using maximum likelihood."""
