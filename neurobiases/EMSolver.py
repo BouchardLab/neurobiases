@@ -341,6 +341,44 @@ class EMSolver():
         """
         return utils.Psi_to_Psi_tr(Psi, self.Psi_transform)
 
+    def bic(self, X=None, Y=None, y=None):
+        """Calculates the Bayesian information criterion on the neural data.
+
+        Parameters
+        ----------
+        X : np.ndarray, shape (D, M)
+            Design matrix for tuning features.
+        Y : np.ndarray, shape (D, N)
+            Design matrix for coupling features.
+        y : np.ndarray, shape (D, 1)
+            Neural response vector.
+
+        Returns
+        -------
+        bic : float
+            The Bayesian information criterion.
+        """
+        # if no data is provided, use the data in the object
+        if X is None:
+            X = self.X
+        if Y is None:
+            Y = self.Y
+        if y is None:
+            y = self.y
+
+        D = X.shape[0]
+        Psi = self.Psi_tr_to_Psi(self.Psi_tr)
+        # calculate marginal log-likelihood
+        mll = self.marginal_log_likelihood(X=X, Y=Y, y=y)
+        # number of parameters
+        k = \
+            np.count_nonzero(self.a) + \
+            np.count_nonzero(self.b) + \
+            np.count_nonzero(self.B) + \
+            Psi.size + self.L.size
+        bic = -2 * mll + k * np.log(D)
+        return bic
+
     def marginal_log_likelihood(self, X=None, Y=None, y=None):
         """Calculates the marginal likelihood of the neural activities given
         the stimulus and current parameter estimates. Can optionally accept
