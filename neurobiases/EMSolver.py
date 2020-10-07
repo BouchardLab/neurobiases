@@ -5,6 +5,8 @@ from .lbfgs import fmin_lbfgs
 from neurobiases import plot
 from neurobiases import solver_utils as utils
 from scipy.optimize import minimize
+from sklearn.decomposition import FactorAnalysis
+from sklearn.linear_model import LinearRegression
 from sklearn.utils import check_random_state
 
 
@@ -49,7 +51,7 @@ class EMSolver():
         self, X, Y, y, K, a_mask=None, b_mask=None, B_mask=None,
         B=None, L_nt=None, L=None, Psi_nt=None, Psi=None, Psi_transform='softplus',
         solver='scipy_lbfgs', max_iter=1000, tol=1e-4, c_tuning=0., c_coupling=0.,
-        random_state=None
+        initialization='zeros', random_state=None
     ):
         # tuning and coupling design matrices
         self.X = X
@@ -72,33 +74,66 @@ class EMSolver():
             self.c_tuning = c_tuning
         self.random_state = check_random_state(random_state)
 
-        # initialize parameter estimates
-        self._init_params()
         # initialize masks
         self.set_masks(a_mask=a_mask, b_mask=b_mask, B_mask=B_mask)
+        # initialize parameter estimates
+        self.initialization = initialization
+        self._init_params(initialization)
         # initialize non-target tuning parameters
         self.freeze_B(B=B)
         # initialize variability parameters
         self.freeze_var_params(L_nt=L_nt, L=L, Psi_nt=Psi_nt, Psi=Psi)
 
-    def _init_params(self):
+    def _init_params(self, initialization='zeros'):
         """Initialize parameter estimates. Requires that X, Y, and y are
         already initialized."""
         # dataset dimensions
         self.D, self.M = self.X.shape
         self.N = self.Y.shape[1]
 
-        # initialize parameter estimates to be all zeros
-        # coupling parameters
-        self.a = np.zeros((self.N, 1))
-        # tuning parameters
-        self.b = np.zeros((self.M, 1))
-        # non-target tuning parameters
-        self.B = np.zeros((self.M, self.N))
-        # private variances
-        self.Psi_tr = np.zeros(self.N + 1)
-        # latent factors are initialized to be small, random values
-        self.L = self.random_state.normal(loc=0., scale=0.1, size=(self.K, self.N + 1))
+        if initialization == 'zeros':
+            # initialize parameter estimates to be all zeros
+            self.a = np.zeros((self.N, 1))
+            self.b = np.zeros((self.M, 1))
+            self.B = np.zeros((self.M, self.N))
+            self.Psi_tr = np.zeros(self.N + 1)
+            self.L = self.random_state.normal(loc=0., scale=0.1, size=(self.K, self.N + 1))
+        elif initialization == 'fits':
+            # initialize parameter estimates via fits
+            # coupling fit
+            coupling_mask = self.a_mask.ravel()
+            self.a = np.zeros((self.N, 1))
+            coupling = LinearRegression(fit_intercept=False)
+            coupling.fit(self.Y[:, coupling_mask], self.y.ravel())
+            self.a[:, coupling_mask] = coupling.coef_
+
+            # tuning fit
+            tuning_mask = self.b_mask.ravel()
+            self.b = np.zeros((self.M, 1))
+            tuning = LinearRegression(fit_intercept=False)
+            tuning.fit(self.X[:, tuning_mask], self.y.ravel())
+            self.b[:, tuning_mask] = tuning.coef_
+
+            # non-target tuning fit
+            self.B = np.zeros((self.M, self.N))
+            for neuron in range(self.N):
+                current_mask = self.B_mask[:, neuron]
+                tuning = LinearRegression(fit_intercept=False)
+                tuning.fit(self.X[:, current_mask], self.Y[:, neuron])
+                self.B[:, neuron][current_mask] = tuning.coef_
+
+            # private and shared variability estimated from factor analysis
+            Y_hat = self.Y - np.dot(self.X, self.B)
+            Z = np.concatenate((self.X[:, tuning_mask], self.Y[:, coupling_mask]))
+            tc_fit = LinearRegression(fit_intercept=False)
+            tc_fit.fit(Z, self.y.ravel())
+            y_hat = y.ravel() - np.dot(Z, tc_fit.coef_)
+            residuals = np.concatenate((y_hat[..., np.newaxis], Y_hat))
+            # run factor analysis on residuals
+            fa = FactorAnalysis(n_components=self.K)
+            fa.fit(residuals)
+            self.L = fa.components_
+            self.Psi_tr = self.Psi_to_Psi_tr(fa.noise_variance_)
 
     def set_masks(self, a_mask=None, b_mask=None, B_mask=None):
         """Initialize masks. A value of None indicates that all features will
