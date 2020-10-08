@@ -101,34 +101,34 @@ class EMSolver():
         elif initialization == 'fits':
             # initialize parameter estimates via fits
             # coupling fit
-            coupling_mask = self.a_mask.ravel()
+            coupling_mask = self.a_mask.ravel().astype('bool')
             self.a = np.zeros((self.N, 1))
             coupling = LinearRegression(fit_intercept=False)
             coupling.fit(self.Y[:, coupling_mask], self.y.ravel())
-            self.a[:, coupling_mask] = coupling.coef_
+            self.a[coupling_mask, 0] = coupling.coef_
 
             # tuning fit
-            tuning_mask = self.b_mask.ravel()
+            tuning_mask = self.b_mask.ravel().astype('bool')
             self.b = np.zeros((self.M, 1))
             tuning = LinearRegression(fit_intercept=False)
             tuning.fit(self.X[:, tuning_mask], self.y.ravel())
-            self.b[:, tuning_mask] = tuning.coef_
+            self.b[tuning_mask, 0] = tuning.coef_
 
             # non-target tuning fit
             self.B = np.zeros((self.M, self.N))
             for neuron in range(self.N):
-                current_mask = self.B_mask[:, neuron]
+                current_mask = self.B_mask[:, neuron].astype('bool')
                 tuning = LinearRegression(fit_intercept=False)
                 tuning.fit(self.X[:, current_mask], self.Y[:, neuron])
                 self.B[:, neuron][current_mask] = tuning.coef_
 
             # private and shared variability estimated from factor analysis
             Y_hat = self.Y - np.dot(self.X, self.B)
-            Z = np.concatenate((self.X[:, tuning_mask], self.Y[:, coupling_mask]))
+            Z = np.concatenate((self.X[:, tuning_mask], self.Y[:, coupling_mask]), axis=1)
             tc_fit = LinearRegression(fit_intercept=False)
             tc_fit.fit(Z, self.y.ravel())
             y_hat = self.y.ravel() - np.dot(Z, tc_fit.coef_)
-            residuals = np.concatenate((y_hat[..., np.newaxis], Y_hat))
+            residuals = np.concatenate((y_hat[..., np.newaxis], Y_hat), axis=1)
             # run factor analysis on residuals
             fa = FactorAnalysis(n_components=self.K)
             fa.fit(residuals)
