@@ -15,12 +15,37 @@ def test_marginal_likelihood():
 
     for tm in [tm1, tm2]:
         X, Y, y = tm.generate_samples(n_samples=1000)
-        solver = EMSolver(X, Y, y, K=1)
+        solver = EMSolver(X, Y, y, K=1, initialization='zeros')
         solver.set_params(L=np.zeros_like(solver.L))
         # test the marginal likelihood
         empirical_likelihood = solver.marginal_log_likelihood()
-        true_likelihood = -0.5 * ((y.T @ y).item() + np.trace(Y @ Y.T))
+        Psi = solver.Psi_tr_to_Psi()
+        true_likelihood = -0.5 * (
+            X.shape[0] * np.log(np.prod(Psi)) +
+            (y.T @ y).item() / Psi[0] + np.trace(Y / Psi[1:] @ Y.T)
+        )
         assert_allclose(true_likelihood, empirical_likelihood)
+
+
+def test_bic():
+    """Tests the marginal likelihood for the linear TM in a simple case."""
+    tm1 = generate_bf_cluster_model()
+    tm2 = generate_dr_cluster_model()
+    D = 1000
+
+    for tm in [tm1, tm2]:
+        X, Y, y = tm.generate_samples(n_samples=D)
+        solver = EMSolver(X, Y, y, K=1)
+        solver.set_params(L=np.zeros_like(solver.L))
+        # test the marginal likelihood
+        empirical_bic = solver.bic()
+        Psi = solver.Psi_tr_to_Psi()
+        true_likelihood = -0.5 * (
+            D * np.log(np.prod(Psi)) +
+            (y.T @ y).item() / Psi[0] + np.trace(Y / Psi[1:] @ Y.T)
+        )
+        true_bic = -2 * true_likelihood + Psi.size * np.log(D)
+        assert_allclose(true_bic, empirical_bic)
 
 
 @pytest.mark.slow
