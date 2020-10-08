@@ -61,6 +61,10 @@ class EMSolver():
         # number of latent factors
         self.K = K
 
+        # dataset dimensions
+        self.D, self.M = self.X.shape
+        self.N = self.Y.shape[1]
+
         # optimization parameters
         self.Psi_transform = Psi_transform
         self.solver = solver
@@ -87,10 +91,6 @@ class EMSolver():
     def _init_params(self, initialization='zeros'):
         """Initialize parameter estimates. Requires that X, Y, and y are
         already initialized."""
-        # dataset dimensions
-        self.D, self.M = self.X.shape
-        self.N = self.Y.shape[1]
-
         if initialization == 'zeros':
             # initialize parameter estimates to be all zeros
             self.a = np.zeros((self.N, 1))
@@ -410,7 +410,8 @@ class EMSolver():
             np.count_nonzero(self.a) + \
             np.count_nonzero(self.b) + \
             np.count_nonzero(self.B) + \
-            Psi.size + self.L.size
+            np.count_nonzero(self.L) + \
+            Psi.size
         bic = -2 * mll + k * np.log(D)
         return bic
 
