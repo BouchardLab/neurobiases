@@ -3,6 +3,8 @@ import pytest
 
 from neurobiases import EMSolver
 from numpy.testing import assert_allclose, assert_array_equal
+from sklearn.linear_model import LinearRegression
+from sklearn.decomposition import FactorAnalysis
 
 from utils import (generate_bf_cluster_model,
                    generate_dr_cluster_model)
@@ -46,6 +48,58 @@ def test_bic():
         )
         true_bic = -2 * true_likelihood + Psi.size * np.log(D)
         assert_allclose(true_bic, empirical_bic)
+
+
+def test_initialization():
+    """Tests the initialization of the EM solver."""
+    # generate data
+    tm = generate_dr_cluster_model()
+    X, Y, y = tm.generate_samples(n_samples=1000)
+
+    # zero initialization
+    solver = EMSolver(X, Y, y, K=1, initialization='zeros')
+    # check that all initializations (except latent factors) are zero
+    assert not np.any(solver.a.ravel())
+    assert not np.any(solver.b.ravel())
+    assert not np.any(solver.B.ravel())
+    assert not np.any(solver.Psi_tr.ravel())
+
+    # fit initialization
+    solver = EMSolver(X, Y, y, K=1, initialization='fits')
+    fitter = LinearRegression(fit_intercept=False)
+    assert_allclose(solver.a.ravel(), fitter.fit(Y, y.ravel()).coef_)
+    assert_allclose(solver.b.ravel(), fitter.fit(X, y.ravel()).coef_)
+    assert_allclose(solver.B, fitter.fit(X, Y).coef_.T)
+    # shared variability
+    Y_res = Y - fitter.predict(X)
+    Z = np.concatenate((X, Y), axis=1)
+    fitter.fit(Z, y.ravel())
+    y_res = y.ravel() - fitter.predict(Z)
+    residuals = np.concatenate((y_res[..., np.newaxis], Y_res), axis=1)
+    fa = FactorAnalysis(n_components=1)
+    fa.fit(residuals)
+    # private variability
+    assert_allclose(fa.noise_variance_, solver.Psi_tr_to_Psi())
+    LL = fa.components_.T @ fa.components_
+    LL_hat = solver.L.T @ solver.L
+    # latent factors
+    assert_allclose(LL, LL_hat)
+
+
+@pytest.mark.slow
+def test_refit():
+    """Tests that the refit option works correctly."""
+    # generate data
+    tm = generate_dr_cluster_model()
+    X, Y, y = tm.generate_samples(n_samples=1000)
+    solver = EMSolver(X, Y, y, K=1, initialization='zeros',
+                      solver='ow_lbfgs',
+                      c_tuning=100,
+                      c_coupling=0.,
+                      max_iter=100)
+    solver.fit_em(refit=True)
+    assert np.count_nonzero(solver.b.ravel()) == 0
+    assert np.count_nonzero(solver.a.ravel()) == solver.N
 
 
 @pytest.mark.slow

@@ -236,8 +236,9 @@ def fista(f_df, params, lr, C0=0., C1=0., zero_start=-1, zero_end=-1,
 
 def cv_sparse_em_solver(
     X, Y, y, coupling_lambdas, tuning_lambdas, Ks, cv=5,
-    solver='ow_lbfgs', max_iter=1000, tol=1e-4, random_state=None,
-    comm=None, cv_verbose=False, em_verbose=False, mstep_verbose=False
+    solver='ow_lbfgs', initialization='fits', max_iter=1000, tol=1e-4,
+    random_state=None, comm=None, cv_verbose=False, em_verbose=False,
+    mstep_verbose=False
 ):
     """Performs a cross-validated, sparse EM fit on the triangular model.
 
@@ -336,11 +337,14 @@ def cv_sparse_em_solver(
                 X=X_train, Y=Y_train, y=y_train,
                 K=int(K),
                 solver=solver,
+                initialization=initialization,
                 max_iter=max_iter,
                 tol=tol,
                 c_tuning=c_tuning,
                 c_coupling=c_coupling,
-                random_state=random_state).fit_em(
+                random_state=random_state)
+            print(emfit.b.ravel())
+            emfit.fit_em(
                     verbose=em_verbose,
                     mstep_verbose=mstep_verbose)
             # store parameter fits

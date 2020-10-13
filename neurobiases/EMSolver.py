@@ -123,12 +123,12 @@ class EMSolver():
                 self.B[:, neuron][current_mask] = tuning.coef_
 
             # private and shared variability estimated from factor analysis
-            Y_hat = self.Y - np.dot(self.X, self.B)
+            Y_res = self.Y - np.dot(self.X, self.B)
             Z = np.concatenate((self.X[:, tuning_mask], self.Y[:, coupling_mask]), axis=1)
             tc_fit = LinearRegression(fit_intercept=False)
             tc_fit.fit(Z, self.y.ravel())
-            y_hat = self.y.ravel() - np.dot(Z, tc_fit.coef_)
-            residuals = np.concatenate((y_hat[..., np.newaxis], Y_hat), axis=1)
+            y_res = self.y.ravel() - np.dot(Z, tc_fit.coef_)
+            residuals = np.concatenate((y_res[..., np.newaxis], Y_res), axis=1)
             # run factor analysis on residuals
             fa = FactorAnalysis(n_components=self.K)
             fa.fit(residuals)
