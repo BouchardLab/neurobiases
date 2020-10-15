@@ -71,7 +71,7 @@ def main(args):
                                  num=args.n_tuning)
     Ks = np.arange(args.max_K) + 1
 
-    scores, a, b, B, Psi, L, n_iterations = cv_sparse_em_solver(
+    mlls, bics, a, b, B, Psi, L, n_iterations = cv_sparse_em_solver(
         X=X, Y=Y, y=y,
         solver='ow_lbfgs', initialization='fits',
         coupling_lambdas=coupling_lambdas, tuning_lambdas=tuning_lambdas, Ks=Ks,
@@ -82,7 +82,8 @@ def main(args):
     )
     if rank == 0:
         np.savez(save_path,
-                 scores=scores,
+                 scores=mlls,
+                 bics=bics,
                  a_est=a,
                  a_true=tm.a.ravel(),
                  b_est=b,

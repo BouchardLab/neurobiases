@@ -278,7 +278,7 @@ def cv_sparse_em_solver(
 
     Returns
     -------
-    scores : np.ndarray
+    mlls : np.ndarray
         The marginal log-likelihood of the trained model on the held out data.
     a : np.ndarray
         The coupling parameters.
@@ -309,7 +309,8 @@ def cv_sparse_em_solver(
     tasks = np.array_split(hyperparameters, size)[rank]
     n_tasks = len(tasks)
     # create storage
-    scores = np.zeros((n_tasks, n_splits))
+    mlls = np.zeros((n_tasks, n_splits))
+    bics = np.zeros((n_tasks, n_splits))
     a = np.zeros((n_tasks, n_splits, N))
     b = np.zeros((n_tasks, n_splits, M))
     B = np.zeros((n_tasks, n_splits, M, N))
@@ -342,11 +343,10 @@ def cv_sparse_em_solver(
                 tol=tol,
                 c_tuning=c_tuning,
                 c_coupling=c_coupling,
-                random_state=random_state)
-            print(emfit.b.ravel())
-            emfit.fit_em(
+                random_state=random_state).fit_em(
                     verbose=em_verbose,
-                    mstep_verbose=mstep_verbose)
+                    mstep_verbose=mstep_verbose
+                )
             # store parameter fits
             a[task_idx, split_idx] = emfit.a.ravel()
             b[task_idx, split_idx] = emfit.b.ravel()
@@ -355,14 +355,17 @@ def cv_sparse_em_solver(
             L[task_idx, split_idx, :int(K), :] = emfit.L
             n_iterations[task_idx, split_idx] = emfit.n_iterations
             # score the resulting fit
-            scores[task_idx, split_idx] = emfit.marginal_log_likelihood(
+            mlls[task_idx, split_idx] = emfit.marginal_log_likelihood(
                 X=X_test, Y=Y_test, y=y_test
             )
+            # calculate BIC
+            bics[task_idx, split_idx] = emfit.bic()
     if comm is not None:
-        scores = Gatherv_rows(scores, comm)
+        mlls = Gatherv_rows(mlls, comm)
+        bics = Gatherv_rows(bics, comm)
         a = Gatherv_rows(a, comm)
         b = Gatherv_rows(b, comm)
         B = Gatherv_rows(B, comm)
         Psi = Gatherv_rows(Psi, comm)
         L = Gatherv_rows(L, comm)
-    return scores, a, b, B, Psi, L, n_iterations
+    return mlls, bics, a, b, B, Psi, L, n_iterations
