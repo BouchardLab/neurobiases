@@ -117,6 +117,5 @@ class TCSolver():
         # fit OLS
         coefs, _ = nnls(Z, self.y.ravel())
         # extract fits into masked arrays
-        breakpoint()
         b_hat[self.b_mask], a_hat[self.a_mask] = np.split(coefs, [self.n_nonzero_tuning])
         return a_hat, b_hat
