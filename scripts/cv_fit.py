@@ -73,7 +73,7 @@ def main(args):
 
     mlls, bics, a, b, B, Psi, L, n_iterations = cv_sparse_em_solver(
         X=X, Y=Y, y=y,
-        solver='ow_lbfgs', initialization='fits',
+        solver='ow_lbfgs', initialization=args.initialization,
         coupling_lambdas=coupling_lambdas, tuning_lambdas=tuning_lambdas, Ks=Ks,
         cv=args.cv, max_iter=args.max_iter, tol=args.tol, comm=comm,
         cv_verbose=args.cv_verbose, em_verbose=args.em_verbose,
@@ -116,6 +116,7 @@ if __name__ == '__main__':
     parser.add_argument('--n_tuning', type=int, default=5)
     parser.add_argument('--max_K', type=int, default=1)
     parser.add_argument('--cv', type=int, default=3)
+    parser.add_argument('--initialization', default='fits')
     parser.add_argument('--max_iter', type=int, default=500)
     parser.add_argument('--tol', type=float, default=1e-8)
     parser.add_argument('--tm_random_state', type=int, default=2332)
