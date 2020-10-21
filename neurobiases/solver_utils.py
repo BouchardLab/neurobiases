@@ -368,4 +368,5 @@ def cv_sparse_em_solver(
         B = Gatherv_rows(B, comm)
         Psi = Gatherv_rows(Psi, comm)
         L = Gatherv_rows(L, comm)
+        n_iterations = Gatherv_rows(n_iterations, comm)
     return mlls, bics, a, b, B, Psi, L, n_iterations
