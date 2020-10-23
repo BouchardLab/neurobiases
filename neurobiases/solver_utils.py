@@ -236,7 +236,7 @@ def fista(f_df, params, lr, C0=0., C1=0., zero_start=-1, zero_end=-1,
 
 def cv_sparse_em_solver(
     X, Y, y, coupling_lambdas, tuning_lambdas, Ks, cv=5,
-    solver='ow_lbfgs', initialization='fits', max_iter=1000, tol=1e-4,
+    solver='ow_lbfgs', initialization='fits', max_iter=1000, tol=1e-4, refit=False,
     random_state=None, comm=None, cv_verbose=False, em_verbose=False,
     mstep_verbose=False
 ):
@@ -345,7 +345,8 @@ def cv_sparse_em_solver(
                 c_coupling=c_coupling,
                 random_state=random_state).fit_em(
                     verbose=em_verbose,
-                    mstep_verbose=mstep_verbose
+                    mstep_verbose=mstep_verbose,
+                    refit=refit
                 )
             # store parameter fits
             a[task_idx, split_idx] = emfit.a.ravel()

@@ -75,10 +75,10 @@ def main(args):
         X=X, Y=Y, y=y,
         solver='ow_lbfgs', initialization=args.initialization,
         coupling_lambdas=coupling_lambdas, tuning_lambdas=tuning_lambdas, Ks=Ks,
-        cv=args.cv, max_iter=args.max_iter, tol=args.tol, comm=comm,
+        cv=args.cv, max_iter=args.max_iter, tol=args.tol, refit=args.refit, comm=comm,
         cv_verbose=args.cv_verbose, em_verbose=args.em_verbose,
         mstep_verbose=args.mstep_verbose,
-        random_state=em_random_state
+        random_state=em_random_state,
     )
     if rank == 0:
         np.savez(save_path,
@@ -128,6 +128,7 @@ if __name__ == '__main__':
     parser.add_argument('--coupling_loc', type=float, default=0.)
     parser.add_argument('--coupling_scale', type=float, default=1.)
     parser.add_argument('--coupling_sum', type=float, default=0.)
+    parser.add_argument('--refit', action='store_true')
     parser.add_argument('--tm_random_state', type=int, default=2332)
     parser.add_argument('--em_random_state', type=int, default=-1)
     parser.add_argument('--cv_verbose', action='store_true')
