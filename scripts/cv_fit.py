@@ -31,22 +31,22 @@ def main(args):
         print(f'Using {N} neurons and {M} tuning dimensions, with {D} samples.')
         print('--------------------------------------------------------------')
 
-    # create triangular model kwargs
-    tuning_kwargs, coupling_kwargs, noise_kwargs, stim_kwargs = \
-        TriangularModel.generate_kwargs(
-            parameter_design='direct_response',
-            M=M, N=N, K=K, corr_cluster=0.4, corr_back=0.1,
-            coupling_sum=0.,
-            tuning_sparsity=0.5, coupling_sparsity=0.5,
-            tuning_random_state=tm_random_state, coupling_random_state=tm_random_state)
-    # generate triangular model
+    # Generate triangular model
     tm = TriangularModel(
         model='linear',
         parameter_design='direct_response',
-        tuning_kwargs=tuning_kwargs,
-        coupling_kwargs=coupling_kwargs,
-        noise_kwargs=noise_kwargs,
-        stim_kwargs=stim_kwargs)
+        M=M, N=N, K=K, corr_cluster=0.4, corr_back=0.1,
+        tuning_distribution=args.tuning_distribution,
+        tuning_loc=args.tuning_loc,
+        tuning_scale=args.tuning_scale,
+        tuning_random_state=tm_random_state,
+        coupling_distribution=args.coupling_distribution,
+        coupling_loc=args.coupling_loc,
+        coupling_scale=args.coupling_scale,
+        coupling_sum=args.coupling_sum,
+        coupling_sparsity=args.coupling_sparsity,
+        coupling_random_state=tm_random_state
+    )
 
     X = None
     Y = None
@@ -119,6 +119,15 @@ if __name__ == '__main__':
     parser.add_argument('--initialization', default='fits')
     parser.add_argument('--max_iter', type=int, default=500)
     parser.add_argument('--tol', type=float, default=1e-8)
+    parser.add_argument('--tuning_distribution', default='gaussian')
+    parser.add_argument('--tuning_sparsity', default=0.5)
+    parser.add_argument('--tuning_loc', type=float, default=0.)
+    parser.add_argument('--tuning_scale', type=float, default=1.)
+    parser.add_argument('--coupling_distribution', default='gaussian')
+    parser.add_argument('--coupling_sparsity', default=0.5)
+    parser.add_argument('--coupling_loc', type=float, default=0.)
+    parser.add_argument('--coupling_scale', type=float, default=1.)
+    parser.add_argument('--coupling_sum', type=float, default=0.)
     parser.add_argument('--tm_random_state', type=int, default=2332)
     parser.add_argument('--em_random_state', type=int, default=-1)
     parser.add_argument('--cv_verbose', action='store_true')

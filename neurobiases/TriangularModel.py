@@ -50,33 +50,79 @@ class TriangularModel:
         number generator is the RandomState instance used by np.random.
     """
     def __init__(
-        self, model='linear', parameter_path=None, parameter_design='basis_functions',
-        coupling_kwargs=None, tuning_kwargs=None, stim_kwargs=None,
-        noise_kwargs=None, random_state=None
+        self, model='linear',
+        parameter_path=None,
+        parameter_design='direct_response',
+        M=50, tuning_sparsity=0.75, tuning_distribution='noisy_hann_window',
+        tuning_noise_scale=None, tuning_peak=150, tuning_loc=0.,
+        tuning_scale=1., tuning_low=0, tuning_high=1., tuning_bound_frac=0.25,
+        tuning_diff_decay=1., tuning_random_state=2332, tuning_bf_scale=None,
+        target_pref_tuning=0.5, tuning_add_noise=True, tuning_overall_scale=1.,
+        N=20, coupling_sparsity=0.5, coupling_distribution='symmetric_lognormal',
+        coupling_loc=-1, coupling_scale=0.5, coupling_random_state=2332,
+        coupling_sum=0., K=1, snr=3, noise_structure='clusters',
+        corr_cluster=0.2, corr_back=0., corr_max=0.3, corr_min=0.0, L_corr=1,
+        stim_distribution='uniform', stim_low=0, stim_high=1,
+        random_state=None
     ):
         self.model = model
         self.parameter_design = parameter_design
 
-        # check if parameters are provided in a file
+        # Check if parameters are provided in a file
         if parameter_path is None:
-            self.coupling_kwargs = coupling_kwargs
-            self.tuning_kwargs = tuning_kwargs
-            self.stim_kwargs = stim_kwargs
-            self.noise_kwargs = noise_kwargs
+            self.tuning_kwargs, self.coupling_kwargs, self.noise_kwargs, self.stim_kwargs = \
+                TriangularModel.generate_kwargs(
+                    parameter_design=parameter_design,
+                    M=M,
+                    tuning_sparsity=tuning_sparsity,
+                    tuning_distribution=tuning_distribution,
+                    tuning_noise_scale=tuning_noise_scale,
+                    tuning_peak=tuning_peak,
+                    tuning_loc=tuning_loc,
+                    tuning_scale=tuning_scale,
+                    tuning_low=tuning_low,
+                    tuning_high=tuning_high,
+                    tuning_bound_frac=tuning_bound_frac,
+                    tuning_diff_decay=tuning_diff_decay,
+                    tuning_random_state=tuning_random_state,
+                    tuning_bf_scale=tuning_bf_scale,
+                    target_pref_tuning=target_pref_tuning,
+                    tuning_add_noise=tuning_add_noise,
+                    tuning_overall_scale=tuning_overall_scale,
+                    N=N,
+                    coupling_sparsity=coupling_sparsity,
+                    coupling_distribution=coupling_distribution,
+                    coupling_loc=coupling_loc,
+                    coupling_scale=coupling_scale,
+                    coupling_random_state=coupling_random_state,
+                    coupling_sum=coupling_sum,
+                    K=K,
+                    snr=snr,
+                    noise_structure=noise_structure,
+                    corr_cluster=corr_cluster,
+                    corr_back=corr_back,
+                    corr_max=corr_max,
+                    corr_min=corr_min,
+                    L_corr=L_corr,
+                    stim_distribution=stim_distribution,
+                    stim_low=stim_low,
+                    stim_high=stim_high
+                )
             self.N = self.coupling_kwargs.get('N', 100)
             self.M = self.tuning_kwargs.get('M', 10)
             self.K = self.noise_kwargs.get('K', 2)
+            # Handle random states
             self.coupling_kwargs['random_state'] = check_random_state(
-                coupling_kwargs.get('random_state', None)
+                self.coupling_kwargs.get('random_state', None)
             )
             self.tuning_kwargs['random_state'] = check_random_state(
-                tuning_kwargs.get('random_state', None)
+                self.tuning_kwargs.get('random_state', None)
             )
             self.noise_kwargs['random_state'] = check_random_state(
-                noise_kwargs.get('random_state', None)
+                self.noise_kwargs.get('random_state', None)
             )
             self.random_state = check_random_state(random_state)
-            # create parameters according to preferred design
+            # Create parameters according to preferred design
             self.a, self.b, self.B = self.generate_triangular_model()
             self.B_all = np.concatenate((self.B, self.b), axis=1)
             self.generate_noise_structure()
@@ -767,8 +813,6 @@ class TriangularModel:
                 mean=kwargs['loc'],
                 sigma=kwargs['scale'],
                 size=size)
-            if kwargs['sum'] is not None:
-                parameters += (kwargs['sum'] - parameters.sum()) / size
 
         # the Hann window is a discrete squared sine over one period
         elif distribution == 'hann_window':
@@ -788,6 +832,10 @@ class TriangularModel:
 
         else:
             raise ValueError('Distribution %s not available.' % distribution)
+
+        if 'sum' in kwargs.keys():
+            if kwargs['sum'] is not None:
+                parameters += (kwargs['sum'] - parameters.sum()) / size
 
         return parameters
 
@@ -830,12 +878,13 @@ class TriangularModel:
     def generate_kwargs(
         parameter_design='direct_response', M=50, tuning_sparsity=0.75,
         tuning_noise_scale=None, tuning_distribution='noisy_hann_window',
-        tuning_peak=150, tuning_bound_frac=0.25, tuning_diff_decay=1.,
-        tuning_random_state=2332, tuning_bf_scale=None, target_pref_tuning=0.5,
-        tuning_add_noise=True, tuning_overall_scale=1., N=20,
-        coupling_sparsity=0.5, coupling_distribution='symmetric_lognormal',
-        coupling_loc=-1, coupling_scale=0.5, coupling_random_state=2332, coupling_sum=0.,
-        K=2, snr=3, noise_structure='clusters', corr_cluster=0.2, corr_back=0.,
+        tuning_peak=150, tuning_loc=0., tuning_scale=1., tuning_low=0, tuning_high=1.,
+        tuning_bound_frac=0.25, tuning_diff_decay=1., tuning_random_state=2332,
+        tuning_bf_scale=None, target_pref_tuning=0.5, tuning_add_noise=True,
+        tuning_overall_scale=1., N=20, coupling_sparsity=0.5,
+        coupling_distribution='symmetric_lognormal', coupling_loc=-1, coupling_scale=0.5,
+        coupling_random_state=2332, coupling_sum=0.,
+        K=1, snr=3, noise_structure='clusters', corr_cluster=0.2, corr_back=0.,
         corr_max=0.3, corr_min=0.0, L_corr=1, stim_distribution='uniform',
         stim_low=0, stim_high=1
     ):
@@ -852,7 +901,15 @@ class TriangularModel:
 
         if parameter_design == 'direct_response':
             tuning_kwargs['distribution'] = tuning_distribution
-            tuning_kwargs['peak'] = tuning_peak
+            if tuning_distribution == 'hann_window' or tuning_distribution == 'noisy_hann_window':
+                tuning_kwargs['peak'] = tuning_peak
+            elif tuning_distribution == 'uniform':
+                tuning_kwargs['low'] = tuning_low
+                tuning_kwargs['high'] = tuning_high
+            else:
+                tuning_kwargs['loc'] = tuning_loc
+                tuning_kwargs['scale'] = tuning_scale
+
             tuning_kwargs['bound_frac'] = tuning_bound_frac
         elif parameter_design == 'basis_functions':
             tuning_kwargs['target_pref_tuning'] = target_pref_tuning
