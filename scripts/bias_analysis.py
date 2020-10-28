@@ -33,12 +33,12 @@ def main(args):
                 model='linear',
                 parameter_design='direct_response',
                 M=M, N=N, K=K,
-                tuning_sparsity=0.60,
+                tuning_sparsity=args.tuning_sparsity,
                 tuning_distribution=args.tuning_distribution,
                 tuning_loc=args.tuning_loc,
                 tuning_scale=args.tuning_scale,
                 tuning_random_state=2332,
-                coupling_sparsity=0.60,
+                coupling_sparsity=args.coupling_sparsity,
                 coupling_distribution=args.coupling_distribution,
                 coupling_loc=coupling_loc,
                 coupling_scale=args.coupling_scale,
@@ -79,10 +79,12 @@ if __name__ == '__main__':
     parser.add_argument('--tuning_distribution', default='gaussian')
     parser.add_argument('--tuning_loc', type=float, default=0.)
     parser.add_argument('--tuning_scale', type=float, default=1.)
+    parser.add_argument('--tuning_sparsity', type=float, default=0.5)
     parser.add_argument('--coupling_distribution', default='gaussian')
     parser.add_argument('--coupling_loc_min', type=float, default=-3)
     parser.add_argument('--coupling_loc_max', type=float, default=3)
     parser.add_argument('--coupling_scale', type=float, default=1.)
+    parser.add_argument('--coupling_sparsity', type=float, default=0.5)
     parser.add_argument('--n_coupling_locs', type=int, default=30)
 
     args = parser.parse_args()
