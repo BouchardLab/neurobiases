@@ -35,16 +35,17 @@ def main(args):
     tm = TriangularModel(
         model='linear',
         parameter_design='direct_response',
-        M=M, N=N, K=K, corr_cluster=0.4, corr_back=0.1,
+        M=M, N=N, K=K, corr_cluster=0.25, corr_back=0.0,
         tuning_distribution=args.tuning_distribution,
+        tuning_sparsity=args.tuning_sparsity,
         tuning_loc=args.tuning_loc,
         tuning_scale=args.tuning_scale,
         tuning_random_state=tm_random_state,
         coupling_distribution=args.coupling_distribution,
+        coupling_sparsity=args.coupling_sparsity,
         coupling_loc=args.coupling_loc,
         coupling_scale=args.coupling_scale,
         coupling_sum=args.coupling_sum,
-        coupling_sparsity=args.coupling_sparsity,
         coupling_random_state=tm_random_state
     )
 
@@ -89,7 +90,7 @@ def main(args):
                  b_est=b,
                  b_true=tm.b.ravel(),
                  B_est=B,
-                 B_true=tm.B.ravel(),
+                 B_true=tm.B,
                  Psi_est=Psi,
                  Psi_true=tm.Psi,
                  L_est=L,
@@ -104,7 +105,7 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run CV solver on triangular model.')
     parser.add_argument('--save_path', type=str)
-    parser.add_argument('--N', type=int, default=15)
+    parser.add_argument('--N', type=int, default=10)
     parser.add_argument('--M', type=int, default=10)
     parser.add_argument('--K', type=int, default=1)
     parser.add_argument('--D', type=int, default=1000)
