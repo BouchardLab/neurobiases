@@ -53,16 +53,16 @@ class TriangularModel:
         self, model='linear',
         parameter_path=None,
         parameter_design='direct_response',
-        M=50, tuning_sparsity=0.75, tuning_distribution='noisy_hann_window',
+        M=50, tuning_distribution='noisy_hann_window', tuning_sparsity=0.50,
         tuning_noise_scale=None, tuning_peak=150, tuning_loc=0.,
         tuning_scale=1., tuning_low=0, tuning_high=1., tuning_bound_frac=0.25,
         tuning_diff_decay=1., tuning_random_state=2332, tuning_bf_scale=None,
         target_pref_tuning=0.5, tuning_add_noise=True, tuning_overall_scale=1.,
-        N=20, coupling_sparsity=0.5, coupling_distribution='symmetric_lognormal',
+        N=20, coupling_distribution='symmetric_lognormal', coupling_sparsity=0.5,
         coupling_loc=-1, coupling_scale=0.5, coupling_random_state=2332,
         coupling_sum=0., K=1, snr=3, noise_structure='clusters',
         corr_cluster=0.2, corr_back=0., corr_max=0.3, corr_min=0.0, L_corr=1,
-        stim_distribution='uniform', stim_low=0, stim_high=1,
+        stim_distribution='uniform', stim_kwargs=None,
         random_state=None
     ):
         self.model = model
@@ -74,8 +74,8 @@ class TriangularModel:
                 TriangularModel.generate_kwargs(
                     parameter_design=parameter_design,
                     M=M,
-                    tuning_sparsity=tuning_sparsity,
                     tuning_distribution=tuning_distribution,
+                    tuning_sparsity=tuning_sparsity,
                     tuning_noise_scale=tuning_noise_scale,
                     tuning_peak=tuning_peak,
                     tuning_loc=tuning_loc,
@@ -90,8 +90,8 @@ class TriangularModel:
                     tuning_add_noise=tuning_add_noise,
                     tuning_overall_scale=tuning_overall_scale,
                     N=N,
-                    coupling_sparsity=coupling_sparsity,
                     coupling_distribution=coupling_distribution,
+                    coupling_sparsity=coupling_sparsity,
                     coupling_loc=coupling_loc,
                     coupling_scale=coupling_scale,
                     coupling_random_state=coupling_random_state,
@@ -105,8 +105,7 @@ class TriangularModel:
                     corr_min=corr_min,
                     L_corr=L_corr,
                     stim_distribution=stim_distribution,
-                    stim_low=stim_low,
-                    stim_high=stim_high
+                    stim_kwargs=stim_kwargs
                 )
             self.N = self.coupling_kwargs.get('N', 100)
             self.M = self.tuning_kwargs.get('M', 10)
@@ -402,10 +401,16 @@ class TriangularModel:
             random_state = check_random_state(random_state)
 
         if self.parameter_design == 'direct_response':
-            X = random_state.uniform(
-                low=self.stim_kwargs['low'], high=self.stim_kwargs['high'],
-                size=(n_samples, self.M)
-            )
+            if self.stim_kwargs['distribution'] == 'uniform':
+                X = random_state.uniform(
+                    low=self.stim_kwargs['low'], high=self.stim_kwargs['high'],
+                    size=(n_samples, self.M)
+                )
+            elif self.stim_kwargs['distribution'] == 'gaussian':
+                X = random_state.normal(
+                    loc=self.stim_kwargs['loc'], scale=self.stim_kwargs['scale'],
+                    size=(n_samples, self.M)
+                )
         elif self.parameter_design == 'basis_functions':
             # draw stimulus and tuning features
             stimuli = random_state.uniform(low=0, high=1, size=n_samples)
@@ -877,16 +882,16 @@ class TriangularModel:
     @staticmethod
     def generate_kwargs(
         parameter_design='direct_response', M=50, tuning_sparsity=0.75,
-        tuning_noise_scale=None, tuning_distribution='noisy_hann_window',
+        tuning_distribution='noisy_hann_window', tuning_noise_scale=None,
         tuning_peak=150, tuning_loc=0., tuning_scale=1., tuning_low=0, tuning_high=1.,
         tuning_bound_frac=0.25, tuning_diff_decay=1., tuning_random_state=2332,
         tuning_bf_scale=None, target_pref_tuning=0.5, tuning_add_noise=True,
-        tuning_overall_scale=1., N=20, coupling_sparsity=0.5,
-        coupling_distribution='symmetric_lognormal', coupling_loc=-1, coupling_scale=0.5,
+        tuning_overall_scale=1., N=20, coupling_distribution='symmetric_lognormal',
+        coupling_sparsity=0.5, coupling_loc=-1, coupling_scale=0.5,
         coupling_random_state=2332, coupling_sum=0.,
         K=1, snr=3, noise_structure='clusters', corr_cluster=0.2, corr_back=0.,
         corr_max=0.3, corr_min=0.0, L_corr=1, stim_distribution='uniform',
-        stim_low=0, stim_high=1
+        stim_kwargs=None
     ):
         """Generates a set of keyword argument dictionaries for the piecewise
         formulated triangular model."""
@@ -944,9 +949,28 @@ class TriangularModel:
                 'corr_min': corr_min,
                 'L_corr': L_corr
             }
-        stim_kwargs = {
-            'distribution': stim_distribution,
-            'low': stim_low,
-            'high': stim_high
-        }
+
+        # Stimulus keyword arguments
+        if stim_kwargs is None:
+            if stim_distribution == 'uniform':
+                stim_kwargs = {
+                    'distribution': 'uniform',
+                    'low': 0,
+                    'high': 1
+                }
+            elif stim_distribution == 'gaussian':
+                stim_kwargs = {
+                    'distribution': 'gaussian',
+                    'loc': 0,
+                    'scale': 1
+                }
+            else:
+                stim_kwargs = {
+                    'distribution': 'uniform',
+                    'low': 0,
+                    'high': 1
+                }
+        else:
+            stim_kwargs['distribution'] = stim_distribution
+
         return tuning_kwargs, coupling_kwargs, noise_kwargs, stim_kwargs
