@@ -14,7 +14,10 @@ def main(args):
     K = args.K
     D = args.D
     save_path = args.save_path
-    tm_random_state = args.tm_random_state
+    if args.tm_random_state == -1:
+        tm_random_state = None
+    else:
+        tm_random_state = args.tm_random_state
     if args.em_random_state == -1:
         em_random_state = None
     else:
