@@ -107,9 +107,9 @@ class TriangularModel:
                     stim_distribution=stim_distribution,
                     stim_kwargs=stim_kwargs
                 )
-            self.N = self.coupling_kwargs.get('N', 100)
+            self.N = self.coupling_kwargs.get('N', 10)
             self.M = self.tuning_kwargs.get('M', 10)
-            self.K = self.noise_kwargs.get('K', 2)
+            self.K = self.noise_kwargs.get('K', 1)
             # Handle random states
             self.coupling_kwargs['random_state'] = check_random_state(
                 self.coupling_kwargs.get('random_state', None)
@@ -219,7 +219,10 @@ class TriangularModel:
 
             B_all = np.concatenate((b, B), axis=1)
             # calculate tuning preferences
-            self.tuning_prefs = np.argmax(B_all, axis=0)
+            self.tuning_prefs = np.insert(np.round(np.linspace(
+                int(n_nonzero_tuning / 2.),
+                self.M - int(n_nonzero_tuning / 2.),
+                self.M)), 0, int(self.M / 2.) - 1)
             a = self.generate_coupling_profile(self.tuning_prefs)
 
         elif self.parameter_design == 'basis_functions':
