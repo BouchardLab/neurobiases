@@ -42,7 +42,7 @@ def main(args):
                 coupling_sparsity=args.coupling_sparsity,
                 coupling_loc=args.coupling_loc,
                 coupling_scale=args.coupling_scale,
-                coupling_random_state=10282020,
+                coupling_random_state=2332,
                 coupling_sum=None,
                 corr_cluster=0.25,
                 corr_back=0.0)

@@ -5,7 +5,7 @@ import time
 from mpi4py import MPI
 from mpi_utils.ndarray import Bcast_from_root
 from neurobiases import TriangularModel
-from neurobiases.solver_utils import cv_sparse_em_solver
+from neurobiases.solver_utils import cv_sparse_em_solver, cv_sparse_tc_solver
 
 
 def main(args):
@@ -18,10 +18,10 @@ def main(args):
         tm_random_state = None
     else:
         tm_random_state = args.tm_random_state
-    if args.em_random_state == -1:
-        em_random_state = None
+    if args.fitter_random_state == -1:
+        fitter_random_state = None
     else:
-        em_random_state = args.em_random_state
+        fitter_random_state = args.fitter_random_state
 
     # MPI communicator
     comm = MPI.COMM_WORLD
@@ -76,31 +76,53 @@ def main(args):
                                  num=args.n_tuning)
     Ks = np.arange(args.max_K) + 1
 
-    mlls, bics, a, b, B, Psi, L, n_iterations = cv_sparse_em_solver(
-        X=X, Y=Y, y=y,
-        solver='ow_lbfgs', initialization=args.initialization,
-        coupling_lambdas=coupling_lambdas, tuning_lambdas=tuning_lambdas, Ks=Ks,
-        cv=args.cv, max_iter=args.max_iter, tol=args.tol, refit=args.refit, comm=comm,
-        cv_verbose=args.cv_verbose, em_verbose=args.em_verbose,
-        mstep_verbose=args.mstep_verbose,
-        random_state=em_random_state,
-    )
+    if args.model_fit == "em":
+        mlls, bics, a, b, B, Psi, L, n_iterations = cv_sparse_em_solver(
+            X=X, Y=Y, y=y, solver='ow_lbfgs', initialization=args.initialization,
+            coupling_lambdas=coupling_lambdas, tuning_lambdas=tuning_lambdas,
+            Ks=Ks, cv=args.cv, max_iter=args.max_iter, tol=args.tol,
+            refit=args.refit, comm=comm, cv_verbose=args.cv_verbose,
+            em_verbose=args.fitter_verbose, mstep_verbose=args.mstep_verbose,
+            random_state=fitter_random_state
+        )
+        if rank == 0:
+            np.savez(save_path,
+                     scores=mlls,
+                     bics=bics,
+                     a_est=a,
+                     a_true=tm.a.ravel(),
+                     b_est=b,
+                     b_true=tm.b.ravel(),
+                     B_est=B,
+                     B_true=tm.B,
+                     Psi_est=Psi,
+                     Psi_true=tm.Psi,
+                     L_est=L,
+                     L_true=tm.L,
+                     X=X, Y=Y, y=y,
+                     n_iterations=n_iterations)
+    elif args.model_fit == "tc":
+        mses, bics, a, b = cv_sparse_tc_solver(
+            X=X, Y=Y, y=y, coupling_lambdas=coupling_lambdas,
+            tuning_lambdas=tuning_lambdas, cv=args.cv, solver='ow_lbfgs',
+            initialization=args.initialization, refit=args.refit,
+            random_state=fitter_random_state, comm=comm,
+            cv_verbose=args.cv_verbose, tc_verbose=args.fitter_verbose
+        )
+        if rank == 0:
+            np.savez(save_path,
+                     scores=mses,
+                     bics=bics,
+                     a_est=a,
+                     a_true=tm.a.ravel(),
+                     b_est=b,
+                     b_true=tm.b.ravel(),
+                     B_true=tm.B,
+                     Psi_true=tm.Psi,
+                     L_true=tm.L,
+                     X=X, Y=Y, y=y)
+
     if rank == 0:
-        np.savez(save_path,
-                 scores=mlls,
-                 bics=bics,
-                 a_est=a,
-                 a_true=tm.a.ravel(),
-                 b_est=b,
-                 b_true=tm.b.ravel(),
-                 B_est=B,
-                 B_true=tm.B,
-                 Psi_est=Psi,
-                 Psi_true=tm.Psi,
-                 L_est=L,
-                 L_true=tm.L,
-                 X=X, Y=Y, y=y,
-                 n_iterations=n_iterations)
         print('Successfully Saved.')
         t2 = time.time()
         print('Job complete. Total time: ', t2 - t0)
@@ -113,6 +135,7 @@ if __name__ == '__main__':
     parser.add_argument('--M', type=int, default=10)
     parser.add_argument('--K', type=int, default=1)
     parser.add_argument('--D', type=int, default=1000)
+    parser.add_argument('--model_fit', default='em')
     parser.add_argument('--coupling_lower', type=float, default=-5)
     parser.add_argument('--coupling_upper', type=float, default=-2)
     parser.add_argument('--n_coupling', type=int, default=5)
@@ -136,9 +159,9 @@ if __name__ == '__main__':
     parser.add_argument('--stim_distribution', default='uniform')
     parser.add_argument('--refit', action='store_true')
     parser.add_argument('--tm_random_state', type=int, default=2332)
-    parser.add_argument('--em_random_state', type=int, default=-1)
+    parser.add_argument('--fitter_random_state', type=int, default=-1)
     parser.add_argument('--cv_verbose', action='store_true')
-    parser.add_argument('--em_verbose', action='store_true')
+    parser.add_argument('--fitter_verbose', action='store_true')
     parser.add_argument('--mstep_verbose', action='store_true')
     args = parser.parse_args()
 

@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from . import EMSolver
+from . import EMSolver, TCSolver
 from .utils import inv_softplus
 from sklearn.model_selection import check_cv
 from sklearn.utils.extmath import cartesian
@@ -371,3 +371,118 @@ def cv_sparse_em_solver(
         L = Gatherv_rows(L, comm)
         n_iterations = Gatherv_rows(n_iterations, comm)
     return mlls, bics, a, b, B, Psi, L, n_iterations
+
+
+def cv_sparse_tc_solver(
+    X, Y, y, coupling_lambdas, tuning_lambdas, cv=5, solver='ow_lbfgs',
+    initialization='random', refit=False, random_state=None, comm=None,
+    cv_verbose=False, tc_verbose=False
+):
+    """Performs a cross-validated, sparse TC fit on the triangular model.
+
+    This function is parallelized with MPI. It parallelizes coupling and tuning
+    hyperparameters. Fits across cross-validation folds
+    are performed within a core.
+
+    Parameters
+    ----------
+    X : np.ndarray, shape (D, M)
+        Design matrix for tuning features.
+    Y : np.ndarray, shape (D, N)
+        Design matrix for coupling features.
+    y : np.ndarray, shape (D, 1)
+        Neural response vector.
+    coupling_lambdas : np.ndarray
+        The coupling sparsity penalties to apply to the optimization.
+    tuning_lambdas : np.ndarray
+        The tuning sparsity penalties to apply to the optimization.
+    cv : int, or cross-validation object
+        The number of cross-validation folds, if int. Can also be its own
+        cross-validator object.
+    solver : string
+        The sparse solver to use. Defaults to orthant-wise LBFGS.
+    random_state : random state object
+        Used for EM solver.
+    comm : MPI communicator
+        For MPI runs. If None, assumes that MPI is not used.
+    verbose : bool
+        If True, prints out updates during hyperparameter folds.
+
+    Returns
+    -------
+    mses : np.ndarray
+        The marginal log-likelihood of the trained model on the held out data.
+    bics : np.ndarray
+
+    a : np.ndarray
+        The coupling parameters.
+    b : np.ndarray
+        The tuning parameters.
+    """
+    # Extract dimensions
+    M = X.shape[1]
+    N = Y.shape[1]
+
+    # Handle MPI communicators, if they are provided
+    rank = 0
+    size = 1
+    if comm is not None:
+        from mpi_utils.ndarray import Gatherv_rows
+        rank = comm.rank
+        size = comm.size
+
+    # Get cv objects
+    cv = check_cv(cv=cv)
+    n_splits = cv.get_n_splits()
+    # Assign tasks
+    hyperparameters = cartesian((coupling_lambdas, tuning_lambdas))
+    tasks = np.array_split(hyperparameters, size)[rank]
+    n_tasks = len(tasks)
+    # Create storage arrays
+    mses = np.zeros((n_tasks, n_splits))
+    bics = np.zeros((n_tasks, n_splits))
+    a = np.zeros((n_tasks, n_splits, N))
+    b = np.zeros((n_tasks, n_splits, M))
+
+    for split_idx, (train_idx, test_idx) in enumerate(cv.split(X, y)):
+        # get training set
+        X_train = X[train_idx]
+        Y_train = Y[train_idx]
+        y_train = y[train_idx]
+        # get test set
+        X_test = X[test_idx]
+        Y_test = Y[test_idx]
+        y_test = y[test_idx]
+
+        # iterate over hyperparameters
+        for task_idx, (c_coupling, c_tuning) in enumerate(tasks):
+            if cv_verbose:
+                print(f'Rank {rank}: fold = {split_idx + 1}',
+                      f'coupling = {c_coupling}, tuning = {c_tuning}')
+            # run the sparse fitter
+            tcfit = TCSolver.TCSolver(
+                X=X_train,
+                Y=Y_train,
+                y=y_train,
+                solver=solver,
+                c_tuning=c_tuning,
+                c_coupling=c_coupling,
+                initialization=initialization,
+                random_state=random_state).fit_lasso(
+                    refit=refit,
+                    verbose=tc_verbose)
+            # store parameter fits
+            a[task_idx, split_idx] = tcfit.a
+            b[task_idx, split_idx] = tcfit.b
+            # score the resulting fit
+            mses[task_idx, split_idx] = tcfit.mse(
+                X=X_test, Y=Y_test, y=y_test
+            )
+            # calculate BIC
+            bics[task_idx, split_idx] = tcfit.bic()
+    if comm is not None:
+        mses = Gatherv_rows(mses, comm)
+        bics = Gatherv_rows(bics, comm)
+        a = Gatherv_rows(a, comm)
+        b = Gatherv_rows(b, comm)
+    return mses, bics, a, b

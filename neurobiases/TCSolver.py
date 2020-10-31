@@ -23,9 +23,8 @@ class TCSolver():
         Mask for tuning features.
     """
     def __init__(
-        self, X, Y, y, a_mask=None, b_mask=None, solver='ow_lbfgs',
-        max_iter=1000, tol=1e-5, c_tuning=0., c_coupling=0.,
-        initialization='random', random_state=None
+        self, X, Y, y, a_mask=None, b_mask=None, solver='ow_lbfgs', c_tuning=0.,
+        c_coupling=0., initialization='random', random_state=None
     ):
         # tuning and coupling design matrices
         self.X = X
@@ -39,8 +38,6 @@ class TCSolver():
         self.set_masks(a_mask=a_mask, b_mask=b_mask)
         # Optimization parameters
         self.solver = solver
-        self.max_iter = max_iter
-        self.tol = tol
         self.c_tuning = c_tuning
         self.c_coupling = c_coupling
 
@@ -105,20 +102,20 @@ class TCSolver():
         b_hat : nd-array, shape (M,)
             The fitted tuning parameters.
         """
-        # initialize storage
-        a_hat = np.zeros(self.N)
-        b_hat = np.zeros(self.M)
-        # apply masks
+        # Apply masks to datasets
         X = self.X[:, self.b_mask]
         Y = self.Y[:, self.a_mask]
-        # form design matrix
+        # Form total design matrix
         Z = np.concatenate((X, Y), axis=1)
-        # fit OLS
+        # Perform OLS fit
         ols = LinearRegression(fit_intercept=False)
         ols.fit(Z, self.y.ravel())
-        # extract fits into masked arrays
-        b_hat[self.b_mask], a_hat[self.a_mask] = np.split(ols.coef_, [self.n_nonzero_tuning])
-        return a_hat, b_hat
+        # Extract fits into class variables
+        self.b[self.b_mask], self.a[self.a_mask] = np.split(
+            ols.coef_,
+            [self.n_nonzero_tuning]
+        )
+        return self
 
     def fit_nnls(self):
         """Fit non-negative least squares to the data.
@@ -144,7 +141,7 @@ class TCSolver():
         b_hat[self.b_mask], a_hat[self.a_mask] = np.split(coefs, [self.n_nonzero_tuning])
         return a_hat, b_hat
 
-    def fit_lasso(self, verbose=False):
+    def fit_lasso(self, refit=False, verbose=False):
         """Fit a lasso regression to the data, using separate penalities on the
         tuning and coupling parameters.
 
@@ -216,8 +213,76 @@ class TCSolver():
             a, b = self.split_params(params)
             b = b / tuning_to_coupling_ratio
         self.a = a
+        self.a_mask = self.a != 0
         self.b = b
-        return a, b
+        self.b_mask = self.b != 0
+        # Perform a refitting using OLS, if necessary
+        if refit:
+            return self.fit_ols()
+        else:
+            return self
+
+    def mse(self, X=None, Y=None, y=None):
+        """Calculate the mean-squared error given the fitted parameters, either
+        on the initialized dataset, or a new one.
+
+        Parameters
+        ----------
+        X : np.ndarray, shape (D, M)
+            Design matrix for tuning features.
+        Y : np.ndarray, shape (D, N)
+            Design matrix for coupling features.
+        y : np.ndarray, shape (D, 1)
+            Neural response vector.
+
+        Returns
+        -------
+        mse : float
+            The mean-squared error.
+        """
+        # If no data is provided, use the data in the object
+        if X is None:
+            X = self.X
+        if Y is None:
+            Y = self.Y
+        if y is None:
+            y = self.y
+        # Calculate mean squared error
+        mse = np.sum((y.ravel() - X @ self.b - Y @ self.a)**2)
+        return mse
+
+    def bic(self, X=None, Y=None, y=None):
+        """Calculates the Bayesian information criterion on the neural data.
+
+        Parameters
+        ----------
+        X : np.ndarray, shape (D, M)
+            Design matrix for tuning features.
+        Y : np.ndarray, shape (D, N)
+            Design matrix for coupling features.
+        y : np.ndarray, shape (D, 1)
+            Neural response vector.
+
+        Returns
+        -------
+        bic : float
+            The Bayesian information criterion.
+        """
+        # If no data is provided, use the data in the object
+        if X is None:
+            X = self.X
+        if Y is None:
+            Y = self.Y
+        if y is None:
+            y = self.y
+
+        D = X.shape[0]
+        # Calculate mean squared error
+        mse = self.mse(X=X, Y=Y, y=y)
+        # Add in penalty for model size
+        k = np.count_nonzero(self.a) + np.count_nonzero(self.b)
+        bic = -2 * mse + k * np.log(D)
+        return bic
 
     @staticmethod
     def f_df_tc(params, X, Y, y, a_mask, b_mask, tuning_to_coupling_ratio):
