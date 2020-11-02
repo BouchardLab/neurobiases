@@ -222,7 +222,7 @@ class TriangularModel:
             self.tuning_prefs = np.insert(np.round(np.linspace(
                 int(n_nonzero_tuning / 2.),
                 self.M - int(n_nonzero_tuning / 2.),
-                self.M)), 0, int(self.M / 2.) - 1)
+                self.N)), 0, int(self.M / 2.) - 1)
             a = self.generate_coupling_profile(self.tuning_prefs)
 
         elif self.parameter_design == 'basis_functions':
