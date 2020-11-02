@@ -37,7 +37,7 @@ def main(args):
                 tuning_sparsity=args.tuning_sparsity,
                 tuning_loc=args.tuning_loc,
                 tuning_scale=args.tuning_scale,
-                tuning_random_state=10282020,
+                tuning_random_state=11022020,
                 coupling_distribution=args.coupling_distribution,
                 coupling_sparsity=args.coupling_sparsity,
                 coupling_loc=coupling_loc,
@@ -54,8 +54,9 @@ def main(args):
             for dataset in range(n_datasets):
                 a_mask, b_mask, _ = tm.get_masks()
                 X, Y, y = tm.generate_samples(n_samples=D, random_state=dataset)
-                solver = TCSolver(X, Y, y, a_mask, b_mask)
-                a_hats[idx, model, dataset], b_hats[idx, model, dataset] = solver.fit_ols()
+                solver = TCSolver(X, Y, y, a_mask, b_mask).fit_ols()
+                a_hats[idx, model, dataset], b_hats[idx, model, dataset] = \
+                    solver.a, solver.b
 
     np.savez(save_path,
              a_trues=a_trues,

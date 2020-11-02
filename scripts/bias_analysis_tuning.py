@@ -54,8 +54,9 @@ def main(args):
             for dataset in range(n_datasets):
                 a_mask, b_mask, _ = tm.get_masks()
                 X, Y, y = tm.generate_samples(n_samples=D, random_state=dataset)
-                solver = TCSolver(X, Y, y, a_mask, b_mask)
-                a_hats[idx, model, dataset], b_hats[idx, model, dataset] = solver.fit_ols()
+                solver = TCSolver(X, Y, y, a_mask, b_mask).fit_ols()
+                a_hats[idx, model, dataset], b_hats[idx, model, dataset] = \
+                    solver.a, solver.b
 
     np.savez(save_path,
              a_trues=a_trues,
