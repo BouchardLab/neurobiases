@@ -213,9 +213,8 @@ class TCSolver():
             a, b = self.split_params(params)
             b = b / tuning_to_coupling_ratio
         self.a = a
-        self.a_mask = self.a != 0
         self.b = b
-        self.b_mask = self.b != 0
+        self.set_masks(a_mask=self.a != 0, b_mask=self.b != 0)
         # Perform a refitting using OLS, if necessary
         if refit:
             return self.fit_ols()
