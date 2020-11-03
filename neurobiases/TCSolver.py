@@ -107,6 +107,11 @@ class TCSolver():
         Y = self.Y[:, self.a_mask]
         # Form total design matrix
         Z = np.concatenate((X, Y), axis=1)
+        # Edge case when masks are empty
+        if Z.shape[1] == 0:
+            self.a = np.zeros(self.N)
+            self.b = np.zeros(self.M)
+            return self
         # Perform OLS fit
         ols = LinearRegression(fit_intercept=False)
         ols.fit(Z, self.y.ravel())
