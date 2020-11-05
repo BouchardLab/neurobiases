@@ -78,7 +78,7 @@ def main(args):
 
     if args.model_fit == "em":
         mlls, bics, a, b, B, Psi, L, n_iterations = cv_sparse_em_solver(
-            X=X, Y=Y, y=y, solver='ow_lbfgs', initialization=args.initialization,
+            X=X, Y=Y, y=y, solver=args.solver, initialization=args.initialization,
             coupling_lambdas=coupling_lambdas, tuning_lambdas=tuning_lambdas,
             Ks=Ks, cv=args.cv, max_iter=args.max_iter, tol=args.tol,
             refit=args.refit, comm=comm, cv_verbose=args.cv_verbose,
@@ -104,7 +104,7 @@ def main(args):
     elif args.model_fit == "tc":
         mses, bics, a, b = cv_sparse_tc_solver(
             X=X, Y=Y, y=y, coupling_lambdas=coupling_lambdas,
-            tuning_lambdas=tuning_lambdas, cv=args.cv, solver='ow_lbfgs',
+            tuning_lambdas=tuning_lambdas, cv=args.cv, solver=args.solver,
             initialization=args.initialization, refit=args.refit,
             random_state=fitter_random_state, comm=comm,
             cv_verbose=args.cv_verbose, tc_verbose=args.fitter_verbose
@@ -157,6 +157,7 @@ if __name__ == '__main__':
     parser.add_argument('--coupling_scale', type=float, default=1.)
     parser.add_argument('--coupling_sum', type=float, default=0.)
     parser.add_argument('--stim_distribution', default='uniform')
+    parser.add_argument('--solver', default='ow_lbfgs')
     parser.add_argument('--refit', action='store_true')
     parser.add_argument('--tm_random_state', type=int, default=2332)
     parser.add_argument('--fitter_random_state', type=int, default=-1)

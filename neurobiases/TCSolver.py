@@ -2,7 +2,7 @@ import numpy as np
 
 from .lbfgs import fmin_lbfgs
 from scipy.optimize import nnls
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import LinearRegression, Lasso
 
 
 class TCSolver():
@@ -24,7 +24,8 @@ class TCSolver():
     """
     def __init__(
         self, X, Y, y, a_mask=None, b_mask=None, solver='ow_lbfgs', c_tuning=0.,
-        c_coupling=0., initialization='random', random_state=None
+        c_coupling=0., initialization='random', max_iter=1000, tol=1e-4,
+        random_state=None
     ):
         # tuning and coupling design matrices
         self.X = X
@@ -34,6 +35,9 @@ class TCSolver():
         # initialize parameter estimates
         self.initialization = initialization
         self._init_params()
+        # Other settings
+        self.max_iter = max_iter
+        self.tol = tol
         # initialize masks
         self.set_masks(a_mask=a_mask, b_mask=b_mask)
         # Optimization parameters
@@ -164,7 +168,34 @@ class TCSolver():
         """
         params = self.get_params()
         # Use orthant-wise lbfgs solver
-        if self.solver == 'ow_lbfgs':
+        if self.solver == 'cd':
+            if self.c_coupling != 0 and self.c_tuning != 0:
+                # Create scaling matrix for data
+                lambdas = np.diag(1. / np.concatenate((
+                    np.repeat(self.c_tuning, self.N),
+                    np.repeat(self.c_coupling, self.M)
+                )))
+                # Form design matrix and rescale
+                Z = np.concatenate((self.X, self.Y), axis=1)
+                Zpr = Z @ lambdas
+                # Apply Lasso
+                solver = Lasso(
+                    alpha=1.0,
+                    fit_intercept=False,
+                    normalize=False,
+                    max_iter=self.max_iter,
+                    tol=self.tol)
+                solver.fit(Zpr, self.y.ravel())
+                # Rescale coefficients back
+                b, a = np.split(lambdas @ solver.coef_, [self.M])
+            elif self.c_tuning == 0 and self.c_coupling != 0:
+                raise NotImplementedError()
+            elif self.c_coupling == 0 and self.c_tuning != 0:
+                raise NotImplementedError()
+            else:
+                return self.fit_ols()
+
+        elif self.solver == 'ow_lbfgs':
             # Create callable for verbosity
             if verbose:
                 # create callback function
@@ -282,7 +313,7 @@ class TCSolver():
 
         D = X.shape[0]
         # Calculate mean squared error
-        mse = self.mse(X=X, Y=Y, y=y)
+        mse = -self.mse(X=X, Y=Y, y=y)
         # Add in penalty for model size
         k = np.count_nonzero(self.a) + np.count_nonzero(self.b)
         bic = -2 * mse + k * np.log(D)
