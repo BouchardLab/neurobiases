@@ -502,3 +502,47 @@ def process_tc_results(results):
                 b_bias_norm[hyp_idx, model_idx, dataset_idx] = b_bias_temp / np.abs(b_true_nz)
 
     return a_trues, b_trues, a_bias, b_bias, a_bias_norm, b_bias_norm
+
+
+def check_identifiability_conditions(Psi_nt, L_nt, B, a_sel, b_sel):
+    """Checks the conditions for clamping identifiability.
+
+    Parameters
+    ----------
+    Psi_nt : np.ndarray, shape (N,)
+        The non-target private variances.
+    L_nt : np.ndarray, shape (K, N)
+        The non-target latent factors.
+    B : np.ndarray, shape (M, N)
+        The non-target tuning parameters.
+    a_sel : np.ndarray
+        The selection profile for the coupling parameters.
+    b_sel : np.ndarray
+        The selection profile for the tuning parameters.
+
+    Returns
+    -------
+    check : bool
+        Whether the check passed.
+    """
+    # Get dimensionalities
+    K = L_nt.shape[0]
+    N = a_sel.size
+    M = b_sel.size
+    # Number of zero parameters
+    sparsity = N + M - a_sel.sum() - b_sel.sum()
+
+    # Dimensionality condition
+    if K > sparsity:
+        return False
+
+    # Rank condition
+    P = np.linalg.solve(np.diag(Psi_nt) + L_nt.T @ L_nt, L_nt.T)
+    P_sub = P[a_sel]
+    Q = np.dot(B, P)
+    Q_sub = Q[b_sel]
+    R = np.concatenate((P_sub, Q_sub), axis=0)
+    rank = np.linalg.matrix_rank(R)
+    if rank < K:
+        return False
+    return True

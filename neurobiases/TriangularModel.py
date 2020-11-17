@@ -551,6 +551,15 @@ class TriangularModel:
         else:
             return a, b, Psi, L
 
+    def check_identifiability_conditions(self, a_mask=None, b_mask=None):
+        if a_mask is None:
+            a_mask = self.a_mask.ravel()
+        if b_mask is None:
+            b_mask = self.b_mask.ravel()
+        return utils.check_identifiability_conditions(
+            Psi_nt=self.Psi_nt, L_nt=self.L_nt, B=self.B, a_sel=a_mask, b_sel=b_mask
+        )
+
     def non_target_signal_variance(self, limits=(0, 1)):
         """Calculates the variance of the non-target signal, i.e., variance
         coming directly from the tuning.
