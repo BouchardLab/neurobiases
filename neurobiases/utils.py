@@ -504,7 +504,7 @@ def process_tc_results(results):
     return a_trues, b_trues, a_bias, b_bias, a_bias_norm, b_bias_norm
 
 
-def check_identifiability_conditions(Psi_nt, L_nt, B, a_sel, b_sel):
+def check_identifiability_conditions(Psi_nt, L_nt, B, a_mask, b_mask):
     """Checks the conditions for clamping identifiability.
 
     Parameters
@@ -515,9 +515,9 @@ def check_identifiability_conditions(Psi_nt, L_nt, B, a_sel, b_sel):
         The non-target latent factors.
     B : np.ndarray, shape (M, N)
         The non-target tuning parameters.
-    a_sel : np.ndarray
+    a_mask : np.ndarray
         The selection profile for the coupling parameters.
-    b_sel : np.ndarray
+    b_mask : np.ndarray
         The selection profile for the tuning parameters.
 
     Returns
@@ -527,10 +527,10 @@ def check_identifiability_conditions(Psi_nt, L_nt, B, a_sel, b_sel):
     """
     # Get dimensionalities
     K = L_nt.shape[0]
-    N = a_sel.size
-    M = b_sel.size
+    N = a_mask.size
+    M = b_mask.size
     # Number of zero parameters
-    sparsity = N + M - a_sel.sum() - b_sel.sum()
+    sparsity = N + M - a_mask.sum() - b_mask.sum()
 
     # Dimensionality condition
     if K > sparsity:
@@ -538,9 +538,9 @@ def check_identifiability_conditions(Psi_nt, L_nt, B, a_sel, b_sel):
 
     # Rank condition
     P = np.linalg.solve(np.diag(Psi_nt) + L_nt.T @ L_nt, L_nt.T)
-    P_sub = P[a_sel]
+    P_sub = P[a_mask]
     Q = np.dot(B, P)
-    Q_sub = Q[b_sel]
+    Q_sub = Q[b_mask]
     R = np.concatenate((P_sub, Q_sub), axis=0)
     rank = np.linalg.matrix_rank(R)
     if rank < K:

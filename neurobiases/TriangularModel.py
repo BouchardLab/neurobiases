@@ -552,12 +552,28 @@ class TriangularModel:
             return a, b, Psi, L
 
     def check_identifiability_conditions(self, a_mask=None, b_mask=None):
+        """Checks the conditions for clamping identifiability.
+
+        Parameters
+        ----------
+        a_mask : np.ndarray
+            The selection profile for the coupling parameters. If None, the
+            stored mask is used.
+        b_mask : np.ndarray
+            The selection profile for the tuning parameters. If None, the stored
+            mask is used.
+
+        Returns
+        -------
+        check : bool
+            Whether the check passed.
+        """
         if a_mask is None:
             a_mask = self.a_mask.ravel()
         if b_mask is None:
             b_mask = self.b_mask.ravel()
         return utils.check_identifiability_conditions(
-            Psi_nt=self.Psi_nt, L_nt=self.L_nt, B=self.B, a_sel=a_mask, b_sel=b_mask
+            Psi_nt=self.Psi_nt, L_nt=self.L_nt, B=self.B, a_mask=a_mask, b_mask=b_mask
         )
 
     def non_target_signal_variance(self, limits=(0, 1)):
