@@ -504,6 +504,50 @@ def process_tc_results(results):
     return a_trues, b_trues, a_bias, b_bias, a_bias_norm, b_bias_norm
 
 
+def process_tc_double_results(results):
+    # Get true and estimated parameters
+    a_trues = results['a_trues']
+    b_trues = results['b_trues']
+    a_hats = results['a_hats']
+    b_hats = results['b_hats']
+
+    # Get number of non-zero parameters
+    n_nz_a = np.unique(np.count_nonzero(a_trues, axis=-1)).item()
+    n_nz_b = np.unique(np.count_nonzero(b_trues, axis=-1)).item()
+    n_hyparams1, n_hyparams2, n_models, n_datasets = a_hats.shape[:-1]
+
+    # Calculate biases
+    a_bias = np.zeros((n_hyparams1, n_hyparams2, n_models, n_datasets, n_nz_a))
+    b_bias = np.zeros((n_hyparams1, n_hyparams2, n_models, n_datasets, n_nz_b))
+    a_bias_norm = np.zeros_like(a_bias)
+    b_bias_norm = np.zeros_like(b_bias)
+
+    for hyp1_idx in range(n_hyparams1):
+        for hyp2_idx in range(n_hyparams2):
+            for model_idx in range(n_models):
+                current_a = a_trues[hyp1_idx, hyp2_idx, model_idx]
+                current_b = b_trues[hyp1_idx, hyp2_idx, model_idx]
+                a_true_nz = current_a[current_a != 0]
+                b_true_nz = current_b[current_b != 0]
+                for dataset_idx in range(n_datasets):
+                    # Calculate biases per model and hyperparameters
+                    a_bias_temp = \
+                        a_hats[hyp1_idx, hyp2_idx, model_idx, dataset_idx][current_a != 0] \
+                        - a_true_nz
+                    b_bias_temp = \
+                        b_hats[hyp1_idx, hyp2_idx, model_idx, dataset_idx][current_b != 0] \
+                        - b_true_nz
+                    a_bias[hyp1_idx, hyp2_idx, model_idx, dataset_idx] = a_bias_temp
+                    b_bias[hyp1_idx, hyp2_idx, model_idx, dataset_idx] = b_bias_temp
+                    # Calculate normalized biases
+                    a_bias_norm[hyp1_idx, hyp2_idx, model_idx, dataset_idx] = \
+                        a_bias_temp / np.abs(a_true_nz)
+                    b_bias_norm[hyp1_idx, hyp2_idx, model_idx, dataset_idx] = \
+                        b_bias_temp / np.abs(b_true_nz)
+
+    return a_trues, b_trues, a_bias, b_bias, a_bias_norm, b_bias_norm
+
+
 def check_identifiability_conditions(Psi_nt, L_nt, B, a_mask, b_mask):
     """Checks the conditions for clamping identifiability.
 
