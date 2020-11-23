@@ -373,6 +373,178 @@ def cv_sparse_em_solver(
     return mlls, bics, a, b, B, Psi, L, n_iterations
 
 
+def cv_sparse_em_solver_datasets(
+    Xs, Ys, ys, coupling_lambdas, tuning_lambdas, Ks, cv=5,
+    solver='ow_lbfgs', initialization='fits', max_iter=1000, tol=1e-4, refit=False,
+    random_state=None, comm=None, cv_verbose=False, em_verbose=False,
+    mstep_verbose=False
+):
+    """Performs a cross-validated, sparse EM fit on the triangular model. This
+    function performs fits across multiple datasets.
+
+    This function is parallelized with MPI. It parallelizes coupling, tuning,
+    and latent hyperparameters across cores. Fits across cross-validation folds
+    are performed within a core.
+
+    Parameters
+    ----------
+    Xs : np.ndarray, shape (n_datasets, D, M)
+        Design matrix for tuning features.
+    Ys : np.ndarray, shape (n_datasets, D, N)
+        Design matrix for coupling features.
+    ys : np.ndarray, shape (n_datasets, D, 1)
+        Neural response vector.
+    coupling_lambdas : np.ndarray
+        The coupling sparsity penalties to apply to the optimization.
+    tuning_lambdas : np.ndarray
+        The tuning sparsity penalties to apply to the optimization.
+    Ks : np.ndarray
+        The latent factors to iterate over.
+    cv : int, or cross-validation object
+        The number of cross-validation folds, if int. Can also be its own
+        cross-validator object.
+    solver : string
+        The sparse solver to use. Defaults to orthant-wise LBFGS.
+    max_iter : int
+        The maximum number of EM iterations.
+    tol : float
+        Convergence criteria for relative decrease in marginal log-likelihood.
+    random_state : random state object
+        Used for EM solver.
+    comm : MPI communicator
+        For MPI runs. If None, assumes that MPI is not used.
+    verbose : bool
+        If True, prints out updates during hyperparameter folds.
+
+    Returns
+    -------
+    mlls : np.ndarray
+        The marginal log-likelihood of the trained model on the held out data.
+    a : np.ndarray
+        The coupling parameters.
+    b : np.ndarray
+        The tuning parameters.
+    B : np.ndarray
+        The non-target tuning parameters.
+    Psi_tr : np.ndarray
+        The transformed private variances.
+    """
+    # Extract Dimensions
+    M = Xs.shape[-1]
+    N = Ys.shape[-1]
+    n_datasets = Xs.shape[0]
+
+    # Handle MPI communicators
+    rank = 0
+    size = 1
+    if comm is not None:
+        from mpi_utils.ndarray import Gatherv_rows
+        rank = comm.rank
+        size = comm.size
+
+    # Get cv objects
+    cv = check_cv(cv=cv)
+    n_splits = cv.get_n_splits()
+    # Assign tasks
+    datasets = np.arange(n_datasets)
+    splits = np.arange(n_splits)
+    hyperparameters = cartesian(
+        (datasets, splits, coupling_lambdas, tuning_lambdas, Ks)
+    )
+    tasks = np.array_split(hyperparameters, size)[rank]
+    n_tasks = len(tasks)
+    # Create storage arrays
+    mlls = np.zeros(n_tasks)
+    bics = np.zeros(n_tasks)
+    a = np.zeros((n_tasks, N))
+    b = np.zeros((n_tasks, M))
+    B = np.zeros((n_tasks, M, N))
+    Psi = np.zeros((n_tasks, N + 1))
+    L = np.zeros((n_tasks, Ks.max(), N + 1))
+    n_iterations = np.zeros(n_tasks)
+
+    # Iterate over tasks for this rank
+    for task_idx, (dataset, split_idx, c_coupling, c_tuning, K) in enumerate(tasks):
+        if cv_verbose:
+            print(f'Rank {rank}:',
+                  f'Dataset {dataset},'
+                  f'Fold = {split_idx + 1},',
+                  f'Coupling Index = {c_coupling},'
+                  f'Tuning Index = {c_tuning},',
+                  f'K = {K}.')
+
+        # Extract the current datasets
+        X = Xs[dataset]
+        Y = Ys[dataset]
+        y = ys[dataset]
+        # Pull out the indices for the current fold
+        train_idx, test_idx = list(cv.split(X))[split_idx]
+        X_train = X[train_idx]
+        Y_train = Y[train_idx]
+        y_train = y[train_idx]
+        X_test = X[test_idx]
+        Y_test = Y[test_idx]
+        y_test = y[test_idx]
+
+        # Run the sparse fitter
+        emfit = EMSolver.EMSolver(
+            X=X_train, Y=Y_train, y=y_train,
+            K=int(K),
+            solver=solver,
+            initialization=initialization,
+            max_iter=max_iter,
+            tol=tol,
+            c_tuning=c_tuning,
+            c_coupling=c_coupling,
+            random_state=random_state).fit_em(
+                verbose=em_verbose,
+                mstep_verbose=mstep_verbose,
+                refit=refit
+            )
+
+        # Store parameter fits
+        a[task_idx] = emfit.a.ravel()
+        b[task_idx] = emfit.b.ravel()
+        B[task_idx] = emfit.B
+        Psi[task_idx] = emfit.Psi_tr_to_Psi()
+        L[task_idx, :int(K), :] = emfit.L
+        n_iterations[task_idx] = emfit.n_iterations
+        # score the resulting fit
+        mlls[task_idx] = emfit.marginal_log_likelihood(
+            X=X_test, Y=Y_test, y=y_test
+        )
+        # calculate BIC
+        bics[task_idx] = emfit.bic()
+
+    if comm is not None:
+        mlls = Gatherv_rows(mlls, comm)
+        bics = Gatherv_rows(bics, comm)
+        a = Gatherv_rows(a, comm)
+        b = Gatherv_rows(b, comm)
+        B = Gatherv_rows(B, comm)
+        Psi = Gatherv_rows(Psi, comm)
+        L = Gatherv_rows(L, comm)
+        n_iterations = Gatherv_rows(n_iterations, comm)
+
+        # Reshape arrays
+        reshape = [
+            n_datasets,
+            n_splits,
+            coupling_lambdas.size,
+            tuning_lambdas.size,
+            Ks.size
+        ]
+        mlls = mlls.reshape(reshape)
+        bics = mlls.reshape(bics)
+        a = a.reshape(reshape + [-1])
+        b = b.reshape(reshape + [-1])
+        B = B.reshape(reshape + [M, N])
+        Psi = Psi.reshape(reshape + [-1])
+        L = L.reshape(reshape + [Ks.max(), N])
+        n_iterations = n_iterations.reshape(reshape + [-1])
+    return mlls, bics, a, b, B, Psi, L, n_iterations
+
+
 def cv_sparse_tc_solver(
     X, Y, y, coupling_lambdas, tuning_lambdas, cv=5, solver='ow_lbfgs',
     initialization='random', refit=False, random_state=None, comm=None,
