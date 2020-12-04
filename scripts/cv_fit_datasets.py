@@ -95,63 +95,63 @@ def main(args):
     if rank == 0:
         print('Broadcasted data.')
 
-        # Fit parameters according to EM or TC
-        if args.model_fit == 'em':
-            mlls, bics, a, b, B, Psi, L, n_iterations = cv_sparse_em_solver_datasets(
-                X=Xs, Y=Ys, y=ys,
-                solver=args.solver,
-                initialization=args.initialization,
-                coupling_lambdas=coupling_lambdas,
-                tuning_lambdas=tuning_lambdas,
-                Ks=Ks,
-                cv=args.cv,
-                max_iter=args.max_iter,
-                tol=args.tol,
-                refit=args.refit,
-                comm=comm,
-                cv_verbose=args.cv_verbose,
-                em_verbose=args.fitter_verbose,
-                mstep_verbose=args.mstep_verbose,
-                random_state=fitter_random_state
+    # Fit parameters according to EM or TC
+    if args.model_fit == 'em':
+        mlls, bics, a, b, B, Psi, L, n_iterations = cv_sparse_em_solver_datasets(
+            X=Xs, Y=Ys, y=ys,
+            solver=args.solver,
+            initialization=args.initialization,
+            coupling_lambdas=coupling_lambdas,
+            tuning_lambdas=tuning_lambdas,
+            Ks=Ks,
+            cv=args.cv,
+            max_iter=args.max_iter,
+            tol=args.tol,
+            refit=args.refit,
+            comm=comm,
+            cv_verbose=args.cv_verbose,
+            em_verbose=args.fitter_verbose,
+            mstep_verbose=args.mstep_verbose,
+            random_state=fitter_random_state
+        )
+        if rank == 0:
+            np.savez(
+                save_path,
+                scores=mlls,
+                bics=bics,
+                a_est=a,
+                a_true=tm.a.ravel(),
+                b_est=b,
+                b_true=tm.b.ravel(),
+                B_est=B,
+                B_true=tm.B,
+                Psi_est=Psi,
+                Psi_true=tm.Psi,
+                L_est=L,
+                L_true=tm.L,
+                n_iterations=n_iterations
             )
-            if rank == 0:
-                np.savez(
-                    save_path,
-                    scores=mlls,
-                    bics=bics,
-                    a_est=a,
-                    a_true=tm.a.ravel(),
-                    b_est=b,
-                    b_true=tm.b.ravel(),
-                    B_est=B,
-                    B_true=tm.B,
-                    Psi_est=Psi,
-                    Psi_true=tm.Psi,
-                    L_est=L,
-                    L_true=tm.L,
-                    n_iterations=n_iterations
-                )
-        elif args.model_fit == "tc":
-            mses, bics, a, b = cv_sparse_tc_solver(
-                X=Xs, Y=Ys, y=ys, coupling_lambdas=coupling_lambdas,
-                tuning_lambdas=tuning_lambdas, cv=args.cv, solver=args.solver,
-                initialization=args.initialization, refit=args.refit,
-                random_state=fitter_random_state, comm=comm,
-                cv_verbose=args.cv_verbose, tc_verbose=args.fitter_verbose
+    elif args.model_fit == "tc":
+        mses, bics, a, b = cv_sparse_tc_solver(
+            X=Xs, Y=Ys, y=ys, coupling_lambdas=coupling_lambdas,
+            tuning_lambdas=tuning_lambdas, cv=args.cv, solver=args.solver,
+            initialization=args.initialization, refit=args.refit,
+            random_state=fitter_random_state, comm=comm,
+            cv_verbose=args.cv_verbose, tc_verbose=args.fitter_verbose
+        )
+        if rank == 0:
+            np.savez(
+                save_path,
+                scores=mses,
+                bics=bics,
+                a_est=a,
+                a_true=tm.a.ravel(),
+                b_est=b,
+                b_true=tm.b.ravel(),
+                B_true=tm.B,
+                Psi_true=tm.Psi,
+                L_true=tm.L
             )
-            if rank == 0:
-                np.savez(
-                    save_path,
-                    scores=mses,
-                    bics=bics,
-                    a_est=a,
-                    a_true=tm.a.ravel(),
-                    b_est=b,
-                    b_true=tm.b.ravel(),
-                    B_true=tm.B,
-                    Psi_true=tm.Psi,
-                    L_true=tm.L
-                )
 
     if rank == 0:
         print('Successfully Saved.')
