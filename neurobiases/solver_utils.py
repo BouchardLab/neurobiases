@@ -546,11 +546,11 @@ def cv_sparse_em_solver_datasets(
 
 
 def cv_sparse_em_solver_full(
-    M, tuning_distribution, tuning_sparsities, tuning_locs, tuning_scale,
-    tuning_random_states, N, coupling_distribution, coupling_sparsities,
-    coupling_locs, coupling_scale, coupling_random_states, K, corr_clusters,
-    corr_back, data_random_states, coupling_lambdas, tuning_lambdas, Ks, D, cv=5,
-    solver='ow_lbfgs', initialization='fits', max_iter=1000, tol=1e-4, refit=False,
+    M, N, K, D, tuning_distribution, tuning_sparsities, tuning_locs, tuning_scale,
+    tuning_random_states, coupling_distribution, coupling_sparsities,
+    coupling_locs, coupling_scale, coupling_random_states, corr_clusters,
+    corr_back, dataset_random_states, coupling_lambdas, tuning_lambdas, Ks, cv=5,
+    solver='ow_lbfgs', initialization='fits', max_iter=1000, tol=1e-4, refit=True,
     random_state=None, comm=None, cv_verbose=False, em_verbose=False,
     mstep_verbose=False
 ):
@@ -606,20 +606,22 @@ def cv_sparse_em_solver_full(
         rank = comm.rank
         size = comm.size
 
+    model_idxs = np.arange(tuning_random_states.size)
     # Get cv objects
     cv = check_cv(cv=cv)
     n_splits = cv.get_n_splits()
     # Assign tasks
     splits = np.arange(n_splits)
+    # Number of models
+
     hyperparameters = cartesian(
         (tuning_sparsities,
          tuning_locs,
-         tuning_random_states,
          coupling_sparsities,
          coupling_locs,
-         coupling_random_states,
+         model_idxs,
          corr_clusters,
-         data_random_states,
+         dataset_random_states,
          splits,
          coupling_lambdas,
          tuning_lambdas,
@@ -632,30 +634,33 @@ def cv_sparse_em_solver_full(
     mlls = np.zeros(n_tasks)
     bics = np.zeros(n_tasks)
     a = np.zeros((n_tasks, N))
+    a_est = np.zeros((n_tasks, N))
     b = np.zeros((n_tasks, M))
+    b_est = np.zeros((n_tasks, M))
     B = np.zeros((n_tasks, M, N))
+    B_est = np.zeros((n_tasks, M, N))
     Psi = np.zeros((n_tasks, N + 1))
+    Psi_est = np.zeros((n_tasks, N + 1))
     L = np.zeros((n_tasks, Ks.max(), N + 1))
-    n_iterations = np.zeros(n_tasks)
+    L_est = np.zeros((n_tasks, Ks.max(), N + 1))
 
     # Iterate over tasks for this rank
     for task_idx, (tuning_sparsity,
                    tuning_loc,
-                   tuning_random_state,
                    coupling_sparsity,
                    coupling_loc,
-                   coupling_random_state,
+                   model_idx,
                    corr_cluster,
-                   data_random_state,
+                   dataset_random_state,
                    split_idx,
                    c_coupling,
                    c_tuning,
-                   K) in enumerate(tasks):
+                   K_cv) in enumerate(tasks):
         if cv_verbose:
-            print(f'Rank {rank}:')
+            print(f'Rank {rank}, Task {task_idx}')
 
         # Generate triangular model
-        tm = TriangularModel(
+        tm = TriangularModel.TriangularModel(
             model='linear',
             parameter_design='direct_response',
             M=M, N=N, K=K,
@@ -665,19 +670,27 @@ def cv_sparse_em_solver_full(
             tuning_sparsity=tuning_sparsity,
             tuning_loc=tuning_loc,
             tuning_scale=tuning_scale,
-            tuning_random_state=tuning_random_state,
+            tuning_random_state=tuning_random_states[int(model_idx)],
             coupling_distribution=coupling_distribution,
             coupling_sparsity=coupling_sparsity,
             coupling_loc=coupling_loc,
             coupling_scale=coupling_scale,
             coupling_sum=None,
-            coupling_random_state=coupling_random_state,
+            coupling_random_state=coupling_random_states[int(model_idx)],
             stim_distribution='uniform'
         )
+        # Store true parameters
+        a[task_idx] = tm.a.ravel()
+        b[task_idx] = tm.b.ravel()
+        B[task_idx] = tm.B
+        Psi[task_idx] = tm.Psi.ravel()
+        L[task_idx, :int(K), :] = tm.L
 
-        X, Y, y = tm.generate_samples(n_samples=D, random_state=random_state)
+        # Generate data using seed
+        X, Y, y = tm.generate_samples(n_samples=D,
+                                      random_state=int(dataset_random_state))
         # Pull out the indices for the current fold
-        train_idx, test_idx = list(cv.split(X))[split_idx]
+        train_idx, test_idx = list(cv.split(X))[int(split_idx)]
         X_train = X[train_idx]
         Y_train = Y[train_idx]
         y_train = y[train_idx]
@@ -688,7 +701,7 @@ def cv_sparse_em_solver_full(
         # Run the sparse fitter
         emfit = EMSolver.EMSolver(
             X=X_train, Y=Y_train, y=y_train,
-            K=int(K),
+            K=int(K_cv),
             solver=solver,
             initialization=initialization,
             max_iter=max_iter,
@@ -702,54 +715,59 @@ def cv_sparse_em_solver_full(
             )
 
         # Store parameter fits
-        a[task_idx] = emfit.a.ravel()
-        b[task_idx] = emfit.b.ravel()
-        B[task_idx] = emfit.B
-        Psi[task_idx] = emfit.Psi_tr_to_Psi()
-        L[task_idx, :int(K), :] = emfit.L
-        n_iterations[task_idx] = emfit.n_iterations
-        # score the resulting fit
+        a_est[task_idx] = emfit.a.ravel()
+        b_est[task_idx] = emfit.b.ravel()
+        B_est[task_idx] = emfit.B
+        Psi_est[task_idx] = emfit.Psi_tr_to_Psi()
+        L_est[task_idx, :int(K), :] = emfit.L
+        # Score the resulting fit
         mlls[task_idx] = emfit.marginal_log_likelihood(
             X=X_test, Y=Y_test, y=y_test
         )
-        # calculate BIC
+        # Calculate BIC
         bics[task_idx] = emfit.bic()
 
     if comm is not None:
         mlls = Gatherv_rows(mlls, comm)
         bics = Gatherv_rows(bics, comm)
         a = Gatherv_rows(a, comm)
+        a_est = Gatherv_rows(a_est, comm)
         b = Gatherv_rows(b, comm)
+        b_est = Gatherv_rows(b_est, comm)
         B = Gatherv_rows(B, comm)
+        B_est = Gatherv_rows(B_est, comm)
         Psi = Gatherv_rows(Psi, comm)
+        Psi_est = Gatherv_rows(Psi_est, comm)
         L = Gatherv_rows(L, comm)
-        n_iterations = Gatherv_rows(n_iterations, comm)
+        L_est = Gatherv_rows(L_est, comm)
 
         # Reshape arrays
-        # TODO
         reshape = [
             tuning_sparsities.size,
             tuning_locs.size,
-            tuning_random_states.size,
             coupling_sparsities.size,
             coupling_locs.size,
-            coupling_random_states.size,
+            model_idxs.size,
             corr_clusters.size,
-            data_random_states.size,
+            dataset_random_states.size,
             splits.size,
             coupling_lambdas.size,
             tuning_lambdas.size,
             Ks.size
         ]
         mlls = mlls.reshape(reshape)
-        bics = mlls.reshape(bics)
+        bics = bics.reshape(reshape)
         a = a.reshape(reshape + [-1])
+        a_est = a_est.reshape(reshape + [-1])
         b = b.reshape(reshape + [-1])
+        b_est = b_est.reshape(reshape + [-1])
         B = B.reshape(reshape + [M, N])
+        B_est = B_est.reshape(reshape + [M, N])
         Psi = Psi.reshape(reshape + [-1])
-        L = L.reshape(reshape + [Ks.max(), N])
-        n_iterations = n_iterations.reshape(reshape + [-1])
-    return mlls, bics, a, b, B, Psi, L, n_iterations
+        Psi_est = Psi_est.reshape(reshape + [-1])
+        L = L.reshape(reshape + [Ks.max(), N + 1])
+        L_est = L_est.reshape(reshape + [Ks.max(), N + 1])
+    return mlls, bics, a, a_est, b, b_est, B, B_est, Psi, Psi_est, L, L_est
 
 
 def cv_sparse_tc_solver(
