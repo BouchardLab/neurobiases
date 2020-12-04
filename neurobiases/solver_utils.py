@@ -606,13 +606,13 @@ def cv_sparse_em_solver_full(
         rank = comm.rank
         size = comm.size
 
+    # Number of models
     model_idxs = np.arange(tuning_random_states.size)
     # Get cv objects
     cv = check_cv(cv=cv)
     n_splits = cv.get_n_splits()
     # Assign tasks
     splits = np.arange(n_splits)
-    # Number of models
 
     hyperparameters = cartesian(
         (tuning_sparsities,
@@ -641,7 +641,7 @@ def cv_sparse_em_solver_full(
     B_est = np.zeros((n_tasks, M, N))
     Psi = np.zeros((n_tasks, N + 1))
     Psi_est = np.zeros((n_tasks, N + 1))
-    L = np.zeros((n_tasks, Ks.max(), N + 1))
+    L = np.zeros((n_tasks, K, N + 1))
     L_est = np.zeros((n_tasks, Ks.max(), N + 1))
 
     # Iterate over tasks for this rank
@@ -883,3 +883,209 @@ def cv_sparse_tc_solver(
         a = Gatherv_rows(a, comm)
         b = Gatherv_rows(b, comm)
     return mses, bics, a, b
+
+
+def cv_sparse_tc_solver_full(
+    M, N, K, D, coupling_distribution, coupling_sparsities,
+    coupling_locs, coupling_scale, coupling_random_states, tuning_distribution,
+    tuning_sparsities, tuning_locs, tuning_scale, tuning_random_states, corr_clusters,
+    corr_back, dataset_random_states, coupling_lambdas, tuning_lambdas, cv=5,
+    solver='ow_lbfgs', initialization='fits', max_iter=1000, tol=1e-4, refit=True,
+    random_state=None, comm=None, cv_verbose=False, tc_verbose=False,
+    mstep_verbose=False
+):
+    """Performs a cross-validated, sparse EM fit on the triangular model. This
+    function performs fits across multiple datasets.
+
+    This function is parallelized with MPI. It parallelizes coupling, tuning,
+    and latent hyperparameters across cores. Fits across cross-validation folds
+    are performed within a core.
+
+    Parameters
+    ----------
+    coupling_lambdas : np.ndarray
+        The coupling sparsity penalties to apply to the optimization.
+    tuning_lambdas : np.ndarray
+        The tuning sparsity penalties to apply to the optimization.
+    Ks : np.ndarray
+        The latent factors to iterate over.
+    cv : int, or cross-validation object
+        The number of cross-validation folds, if int. Can also be its own
+        cross-validator object.
+    solver : string
+        The sparse solver to use. Defaults to orthant-wise LBFGS.
+    max_iter : int
+        The maximum number of EM iterations.
+    tol : float
+        Convergence criteria for relative decrease in marginal log-likelihood.
+    random_state : random state object
+        Used for EM solver.
+    comm : MPI communicator
+        For MPI runs. If None, assumes that MPI is not used.
+    verbose : bool
+        If True, prints out updates during hyperparameter folds.
+
+    Returns
+    -------
+    mlls : np.ndarray
+        The marginal log-likelihood of the trained model on the held out data.
+    a : np.ndarray
+        The coupling parameters.
+    b : np.ndarray
+        The tuning parameters.
+    B : np.ndarray
+        The non-target tuning parameters.
+    Psi_tr : np.ndarray
+        The transformed private variances.
+    """
+    # Handle MPI communicators
+    rank = 0
+    size = 1
+    if comm is not None:
+        from mpi_utils.ndarray import Gatherv_rows
+        rank = comm.rank
+        size = comm.size
+
+    # Number of models
+    model_idxs = np.arange(tuning_random_states.size)
+    # Get cv objects
+    cv = check_cv(cv=cv)
+    n_splits = cv.get_n_splits()
+    # Assign tasks
+    splits = np.arange(n_splits)
+
+    hyperparameters = cartesian(
+        (tuning_sparsities,
+         tuning_locs,
+         coupling_sparsities,
+         coupling_locs,
+         model_idxs,
+         corr_clusters,
+         dataset_random_states,
+         splits,
+         coupling_lambdas,
+         tuning_lambdas)
+    )
+    tasks = np.array_split(hyperparameters, size)[rank]
+    n_tasks = len(tasks)
+
+    # Create storage arrays
+    mses = np.zeros(n_tasks)
+    bics = np.zeros(n_tasks)
+    a = np.zeros((n_tasks, N))
+    a_est = np.zeros((n_tasks, N))
+    b = np.zeros((n_tasks, M))
+    b_est = np.zeros((n_tasks, M))
+    B = np.zeros((n_tasks, M, N))
+    Psi = np.zeros((n_tasks, N + 1))
+    L = np.zeros((n_tasks, K, N + 1))
+
+    # Iterate over tasks for this rank
+    for task_idx, (tuning_sparsity,
+                   tuning_loc,
+                   coupling_sparsity,
+                   coupling_loc,
+                   model_idx,
+                   corr_cluster,
+                   dataset_random_state,
+                   split_idx,
+                   c_coupling,
+                   c_tuning) in enumerate(tasks):
+        if cv_verbose:
+            print(f'Rank {rank}, Task {task_idx}')
+
+        # Generate triangular model
+        tm = TriangularModel.TriangularModel(
+            model='linear',
+            parameter_design='direct_response',
+            M=M, N=N, K=K,
+            corr_cluster=corr_cluster,
+            corr_back=corr_back,
+            tuning_distribution=tuning_distribution,
+            tuning_sparsity=tuning_sparsity,
+            tuning_loc=tuning_loc,
+            tuning_scale=tuning_scale,
+            tuning_random_state=tuning_random_states[int(model_idx)],
+            coupling_distribution=coupling_distribution,
+            coupling_sparsity=coupling_sparsity,
+            coupling_loc=coupling_loc,
+            coupling_scale=coupling_scale,
+            coupling_sum=None,
+            coupling_random_state=coupling_random_states[int(model_idx)],
+            stim_distribution='uniform'
+        )
+        # Store true parameters
+        a[task_idx] = tm.a.ravel()
+        b[task_idx] = tm.b.ravel()
+        B[task_idx] = tm.B
+        Psi[task_idx] = tm.Psi.ravel()
+        L[task_idx, :int(K), :] = tm.L
+
+        # Generate data using seed
+        X, Y, y = tm.generate_samples(n_samples=D,
+                                      random_state=int(dataset_random_state))
+        # Pull out the indices for the current fold
+        train_idx, test_idx = list(cv.split(X))[int(split_idx)]
+        X_train = X[train_idx]
+        Y_train = Y[train_idx]
+        y_train = y[train_idx]
+        X_test = X[test_idx]
+        Y_test = Y[test_idx]
+        y_test = y[test_idx]
+
+        # Run the sparse fitter
+        tcfit = TCSolver.TCSolver(
+            X=X_train,
+            Y=Y_train,
+            y=y_train,
+            solver=solver,
+            c_tuning=c_tuning,
+            c_coupling=c_coupling,
+            initialization=initialization,
+            random_state=random_state).fit_lasso(
+                refit=refit,
+                verbose=tc_verbose)
+
+        # Store parameter fits
+        a_est[task_idx] = tcfit.a.ravel()
+        b_est[task_idx] = tcfit.b.ravel()
+
+        # Score the resulting fit
+        mses[task_idx] = tcfit.mse(X=X_test, Y=Y_test, y=y_test)
+        # Calculate BIC
+        bics[task_idx] = tcfit.bic()
+
+    if comm is not None:
+        mses = Gatherv_rows(mses, comm)
+        bics = Gatherv_rows(bics, comm)
+        a = Gatherv_rows(a, comm)
+        a_est = Gatherv_rows(a_est, comm)
+        b = Gatherv_rows(b, comm)
+        b_est = Gatherv_rows(b_est, comm)
+        B = Gatherv_rows(B, comm)
+        Psi = Gatherv_rows(Psi, comm)
+        L = Gatherv_rows(L, comm)
+
+        # Reshape arrays
+        reshape = [
+            tuning_sparsities.size,
+            tuning_locs.size,
+            coupling_sparsities.size,
+            coupling_locs.size,
+            model_idxs.size,
+            corr_clusters.size,
+            dataset_random_states.size,
+            splits.size,
+            coupling_lambdas.size,
+            tuning_lambdas.size,
+        ]
+        mses = mses.reshape(reshape)
+        bics = bics.reshape(reshape)
+        a = a.reshape(reshape + [-1])
+        a_est = a_est.reshape(reshape + [-1])
+        b = b.reshape(reshape + [-1])
+        b_est = b_est.reshape(reshape + [-1])
+        B = B.reshape(reshape + [M, N])
+        Psi = Psi.reshape(reshape + [-1])
+        L = L.reshape(reshape + [K, N + 1])
+    return mses, bics, a, a_est, b, b_est, B, Psi, L

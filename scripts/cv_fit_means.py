@@ -3,7 +3,8 @@ import numpy as np
 import time
 
 from mpi4py import MPI
-from neurobiases.solver_utils import cv_sparse_em_solver_full
+from neurobiases.solver_utils import (cv_sparse_em_solver_full,
+                                      cv_sparse_tc_solver_full)
 
 
 def main(args):
@@ -77,7 +78,7 @@ def main(args):
         print(f'{size} processes running, this is rank {rank}.')
         print('--------------------------------------------------------------')
 
-    # Fit parameters according to EM or TC
+    # Fit parameters according to TM (using EM)
     if model_fit == 'em':
         mlls, bics, a, a_est, b, b_est, B, B_est, Psi, Psi_est, L, L_est = \
             cv_sparse_em_solver_full(
@@ -130,8 +131,54 @@ def main(args):
                 L_true=L_est
             )
 
+    # Fit parameters according to TCM (using sparse TC solver)
     elif model_fit == 'tc':
-        raise NotImplementedError('Not implemented TC.')
+        mses, bics, a, a_est, b, b_est, B, Psi, L = \
+            cv_sparse_tc_solver_full(
+                M=M, N=N, K=K, D=D,
+                coupling_distribution=args.coupling_distribution,
+                coupling_sparsities=np.array([args.coupling_sparsity]),
+                coupling_locs=coupling_locs,
+                coupling_scale=args.coupling_scale,
+                coupling_random_states=coupling_random_states,
+                tuning_distribution=args.tuning_distribution,
+                tuning_sparsities=np.array([args.tuning_sparsity]),
+                tuning_locs=tuning_locs,
+                tuning_scale=args.tuning_scale,
+                tuning_random_states=tuning_random_states,
+                corr_clusters=np.array([args.corr_cluster]),
+                corr_back=args.corr_back,
+                dataset_random_states=dataset_random_states,
+                coupling_lambdas=coupling_lambdas,
+                tuning_lambdas=tuning_lambdas,
+                cv=args.cv,
+                solver=args.solver,
+                initialization=args.initialization,
+                max_iter=args.max_iter,
+                tol=args.tol,
+                refit=args.refit,
+                random_state=fitter_random_state,
+                comm=comm,
+                cv_verbose=args.cv_verbose,
+                em_verbose=args.fitter_verbose,
+                mstep_verbose=args.mstep_verbose,
+            )
+        if rank == 0:
+            np.savez(
+                save_path,
+                coupling_random_states=coupling_random_states,
+                tuning_random_states=tuning_random_states,
+                dataset_random_states=dataset_random_states,
+                mses=mses,
+                bics=bics,
+                a_est=a,
+                a_true=a_est,
+                b_est=b,
+                b_true=b_est,
+                B_est=B,
+                Psi_est=Psi,
+                L_est=L,
+            )
     else:
         raise ValueError('Incorrect model fit input.')
 
