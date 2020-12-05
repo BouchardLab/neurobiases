@@ -27,12 +27,14 @@ def main(args):
                               args.tuning_loc_max,
                               n_tuning_locs)
     # Create hyperparameters for CV fitting
+    n_coupling_lambdas = args.n_coupling_lambdas
     coupling_lambdas = np.logspace(args.coupling_lambda_lower,
                                    args.coupling_lambda_upper,
-                                   num=args.n_coupling_lambdas)
+                                   num=n_coupling_lambdas)
+    n_tuning_lambdas = args.n_tuning_lambdas
     tuning_lambdas = np.logspace(args.tuning_lambda_lower,
                                  args.tuning_lambda_upper,
-                                 num=args.n_tuning_lambdas)
+                                 num=n_tuning_lambdas)
     Ks = np.arange(args.max_K) + 1
 
     # Process coupling random states
@@ -74,8 +76,11 @@ def main(args):
     rank = comm.rank
     if rank == 0:
         t0 = time.time()
+        n_total_tasks = n_coupling_locs * n_tuning_locs * n_models * n_datasets \
+            * n_coupling_lambdas * n_tuning_lambdas * Ks.size * args.cv
         print('--------------------------------------------------------------')
         print(f'{size} processes running, this is rank {rank}.')
+        print(f'Number of total tasks: {n_total_tasks}.')
         print('--------------------------------------------------------------')
 
     # Fit parameters according to TM (using EM)
@@ -157,11 +162,9 @@ def main(args):
                 max_iter=args.max_iter,
                 tol=args.tol,
                 refit=args.refit,
-                random_state=fitter_random_state,
                 comm=comm,
                 cv_verbose=args.cv_verbose,
-                em_verbose=args.fitter_verbose,
-                mstep_verbose=args.mstep_verbose,
+                tc_verbose=args.fitter_verbose,
             )
         if rank == 0:
             np.savez(

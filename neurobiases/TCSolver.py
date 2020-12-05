@@ -25,7 +25,6 @@ class TCSolver():
     def __init__(
         self, X, Y, y, a_mask=None, b_mask=None, solver='ow_lbfgs', c_tuning=0.,
         c_coupling=0., initialization='random', max_iter=1000, tol=1e-4,
-        random_state=None
     ):
         # tuning and coupling design matrices
         self.X = X

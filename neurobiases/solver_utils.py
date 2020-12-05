@@ -888,42 +888,75 @@ def cv_sparse_tc_solver(
 def cv_sparse_tc_solver_full(
     M, N, K, D, coupling_distribution, coupling_sparsities,
     coupling_locs, coupling_scale, coupling_random_states, tuning_distribution,
-    tuning_sparsities, tuning_locs, tuning_scale, tuning_random_states, corr_clusters,
-    corr_back, dataset_random_states, coupling_lambdas, tuning_lambdas, cv=5,
-    solver='ow_lbfgs', initialization='fits', max_iter=1000, tol=1e-4, refit=True,
-    random_state=None, comm=None, cv_verbose=False, tc_verbose=False,
-    mstep_verbose=False
+    tuning_sparsities, tuning_locs, tuning_scale, tuning_random_states,
+    corr_clusters, corr_back, dataset_random_states, coupling_lambdas,
+    tuning_lambdas, cv=5, solver='ow_lbfgs', initialization='fits',
+    max_iter=1000, tol=1e-4, refit=True, comm=None, cv_verbose=False,
+    tc_verbose=False
 ):
-    """Performs a cross-validated, sparse EM fit on the triangular model. This
-    function performs fits across multiple datasets.
+    """Performs a cross-validated, sparse TCM fit on data generated from a
+    (possibly multiple) TM.
 
-    This function is parallelized with MPI. It parallelizes coupling, tuning,
-    and latent hyperparameters across cores. Fits across cross-validation folds
-    are performed within a core.
+    This function parallelizes across TM hyperparameters, model instantiations,
+    dataset instantiations, cross-validation fold, and cross-validation
+    hyperparameters.
 
     Parameters
     ----------
+    M : int
+        The number of tuning parameters.
+    N : int
+        The number of coupling parameters.
+    K : int
+        The number of latent factors.
+    D : int
+        The dataset size.
+    coupling_distribution : string
+        The distribution from which to draw the coupling parameters.
+    coupling_sparsities : np.ndarray
+        An array of coupling sparsities over which TMs are instantiated.
+    coupling_locs : np.ndarray
+        An array of coupling means over which TMs are instantiated.
+    coupling_scale : float
+        The scale parameter with which to instantiate TM coupling parameters.
+        This does not vary across model hyperparameters.
+    coupling_random_states : np.ndarray
+        An array of ints with which to seed the TM coupling parameters. These
+        guarantee that the model can be reproduced.
+    tuning_distribution : string
+        The distribution from which to draw the tuning parameters.
+    tuning_sparsities : np.ndarray
+        An array of tuning sparsities over which TMs are instantiated.
+    tuning_locs : np.ndarray
+        An array of tuning means over which TMs are instantiated.
+    tuning_scale : float
+        The scale parameter with which to instantiate TM tuning parameters.
+        This does not vary across model hyperparameters.
+    tuning_random_states : np.ndarray
+        An array of ints with which to seed the TM tuning parameters. These
+        guarantee that the model can be reproduced.
     coupling_lambdas : np.ndarray
-        The coupling sparsity penalties to apply to the optimization.
+        The coupling sparsity penalties to apply to each optimization.
     tuning_lambdas : np.ndarray
-        The tuning sparsity penalties to apply to the optimization.
+        The tuning sparsity penalties to apply to each optimization.
     Ks : np.ndarray
-        The latent factors to iterate over.
+        The latent factors to cross-validate over for fitting.
     cv : int, or cross-validation object
-        The number of cross-validation folds, if int. Can also be its own
-        cross-validator object.
+        The number of cross-validation folds, or a cross-validation object.
     solver : string
         The sparse solver to use. Defaults to orthant-wise LBFGS.
+    initialization : string
+        The type of procedure to use for initializing the parameters.
     max_iter : int
         The maximum number of EM iterations.
     tol : float
-        Convergence criteria for relative decrease in marginal log-likelihood.
-    random_state : random state object
-        Used for EM solver.
+        The convergence criteria for coordinate descent.
     comm : MPI communicator
-        For MPI runs. If None, assumes that MPI is not used.
-    verbose : bool
-        If True, prints out updates during hyperparameter folds.
+        The MPI communicator. If None, assumes that MPI is not used.
+    cv_verbose : bool
+        Verbosity flag for the CV folds.
+    tc_verbose : bool
+        Verbosity flag for the TC solver.
 
     Returns
     -------
@@ -1042,9 +1075,11 @@ def cv_sparse_tc_solver_full(
             c_tuning=c_tuning,
             c_coupling=c_coupling,
             initialization=initialization,
-            random_state=random_state).fit_lasso(
-                refit=refit,
-                verbose=tc_verbose)
+            max_iter=max_iter,
+            tol=tol
+        ).fit_lasso(
+            refit=refit,
+            verbose=tc_verbose)
 
         # Store parameter fits
         a_est[task_idx] = tcfit.a.ravel()
