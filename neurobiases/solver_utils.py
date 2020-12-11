@@ -1112,7 +1112,7 @@ def cv_sparse_tc_solver_full(
             dataset_random_states.size,
             splits.size,
             coupling_lambdas.size,
-            tuning_lambdas.size,
+            tuning_lambdas.size
         ]
         mses = mses.reshape(reshape)
         bics = bics.reshape(reshape)
