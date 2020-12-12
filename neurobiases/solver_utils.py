@@ -1101,26 +1101,27 @@ def cv_sparse_tc_solver_full(
         Psi = Gatherv_rows(Psi, comm)
         L = Gatherv_rows(L, comm)
 
-        # Reshape arrays
-        reshape = [
-            tuning_sparsities.size,
-            tuning_locs.size,
-            coupling_sparsities.size,
-            coupling_locs.size,
-            model_idxs.size,
-            corr_clusters.size,
-            dataset_random_states.size,
-            splits.size,
-            coupling_lambdas.size,
-            tuning_lambdas.size
-        ]
-        mses = mses.reshape(reshape)
-        bics = bics.reshape(reshape)
-        a = a.reshape(reshape + [-1])
-        a_est = a_est.reshape(reshape + [-1])
-        b = b.reshape(reshape + [-1])
-        b_est = b_est.reshape(reshape + [-1])
-        B = B.reshape(reshape + [M, N])
-        Psi = Psi.reshape(reshape + [-1])
-        L = L.reshape(reshape + [K, N + 1])
+        if rank == 0:
+            # Reshape arrays
+            reshape = [
+                tuning_sparsities.size,
+                tuning_locs.size,
+                coupling_sparsities.size,
+                coupling_locs.size,
+                model_idxs.size,
+                corr_clusters.size,
+                dataset_random_states.size,
+                splits.size,
+                coupling_lambdas.size,
+                tuning_lambdas.size
+            ]
+            mses = mses.reshape(reshape)
+            bics = bics.reshape(reshape)
+            a = a.reshape(reshape + [-1])
+            a_est = a_est.reshape(reshape + [-1])
+            b = b.reshape(reshape + [-1])
+            b_est = b_est.reshape(reshape + [-1])
+            B = B.reshape(reshape + [M, N])
+            Psi = Psi.reshape(reshape + [-1])
+            L = L.reshape(reshape + [K, N + 1])
     return mses, bics, a, a_est, b, b_est, B, Psi, L

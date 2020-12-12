@@ -1,4 +1,5 @@
 import argparse
+import h5py
 import numpy as np
 import time
 
@@ -174,46 +175,49 @@ def main(args):
                                   'split_idx',
                                   'coupling_lambda',
                                   'tuning_lambda'])
-            np.savez(
-                save_path,
-                coupling_random_states=coupling_random_states,
-                tuning_random_states=tuning_random_states,
-                dataset_random_states=dataset_random_states,
-                mses=np.squeeze(mses),
-                bics=np.squeeze(bics),
-                a_true=np.squeeze(a),
-                a_est=np.squeeze(a_est),
-                b_true=np.squeeze(b),
-                b_est=np.squeeze(b_est),
-                B=np.squeeze(B),
-                Psi=np.squeeze(Psi),
-                L=np.squeeze(L, axis=(0, 2, 5)),
-                coupling_locs=coupling_locs,
-                tuning_locs=tuning_locs,
-                coupling_lambdas=coupling_lambdas,
-                tuning_lambdas=tuning_lambdas,
-                model_fit=args.model_fit,
-                N=N,
-                M=M,
-                K=K,
-                D=D,
-                n_datasets=n_datasets,
-                n_models=n_models,
-                n_splits=args.cv,
-                coupling_distribution=args.coupling_distribution,
-                coupling_sparsity=args.coupling_sparsity,
-                coupling_scale=args.coupling_scale,
-                tuning_distribution=args.tuning_distribution,
-                tuning_sparsity=args.tuning_sparsity,
-                tuning_scale=args.tuning_scale,
-                corr_cluster=args.corr_cluster,
-                corr_back=args.corr_back,
-                solver=args.solver,
-                initialization=args.initialization,
-                max_iter=args.max_iter,
-                tol=args.tol,
-                shape_key=shape_key
+            results = h5py.File(save_path, 'w')
+            shape_key_h5 = results.create_dataset(
+                'shape_key',
+                (len(shape_key),),
+                dtype=h5py.special_dtype(vlen=str)
             )
+            shape_key_h5[:] = shape_key
+            results['coupling_random_states'] = coupling_random_states
+            results['tuning_random_states'] = tuning_random_states
+            results['dataset_random_states'] = dataset_random_states
+            results['mses'] = np.squeeze(mses)
+            results['bics'] = np.squeeze(bics)
+            results['a_true'] = np.squeeze(a)
+            results['a_est'] = np.squeeze(a_est)
+            results['b_true'] = np.squeeze(b)
+            results['b_est'] = np.squeeze(b_est)
+            results['B'] = np.squeeze(B)
+            results['Psi'] = np.squeeze(Psi)
+            results['L'] = np.squeeze(L, axis=(0, 2, 5))
+            results['coupling_locs'] = coupling_locs
+            results['tuning_locs'] = tuning_locs
+            results['coupling_lambdas'] = coupling_lambdas
+            results['tuning_lambdas'] = tuning_lambdas
+            results.attrs['model_fit'] = args.model_fit
+            results.attrs['N'] = N
+            results.attrs['M'] = M
+            results.attrs['K'] = K
+            results.attrs['D'] = D
+            results.attrs['n_datasets'] = n_datasets
+            results.attrs['n_models'] = n_models
+            results.attrs['n_splits'] = args.cv
+            results.attrs['coupling_distribution'] = args.coupling_distribution
+            results.attrs['coupling_sparsity'] = args.coupling_sparsity
+            results.attrs['coupling_scale'] = args.coupling_scale
+            results.attrs['tuning_distribution'] = args.tuning_distribution
+            results.attrs['tuning_sparsity'] = args.tuning_sparsity
+            results.attrs['tuning_scale'] = args.tuning_scale
+            results.attrs['corr_cluster'] = args.corr_cluster
+            results.attrs['corr_back'] = args.corr_back
+            results.attrs['solver'] = args.solver
+            results.attrs['initialization'] = args.initialization
+            results.attrs['max_iter'] = args.max_iter
+            results.attrs['tol'] = args.tol
     else:
         raise ValueError('Incorrect model fit input.')
 
