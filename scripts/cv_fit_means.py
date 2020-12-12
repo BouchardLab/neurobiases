@@ -244,10 +244,10 @@ if __name__ == '__main__':
     parser.add_argument('--n_tuning_locs', type=int, default=30)
     parser.add_argument('--tuning_loc_min', type=float, default=-3)
     parser.add_argument('--tuning_loc_max', type=float, default=3)
+    # CV fitting hyperparameters
     parser.add_argument('--n_coupling_lambdas', type=int, default=30)
     parser.add_argument('--coupling_lambda_lower', type=float, default=-5)
     parser.add_argument('--coupling_lambda_upper', type=float, default=-2)
-    # CV fitting hyperparameters
     parser.add_argument('--n_tuning_lambdas', type=int, default=30)
     parser.add_argument('--tuning_lambda_lower', type=float, default=-5)
     parser.add_argument('--tuning_lambda_upper', type=float, default=-2)
