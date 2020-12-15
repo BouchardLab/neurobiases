@@ -1,10 +1,8 @@
-import h5py
 import neurobiases.utils as utils
 import neurobiases.plot as plot
 import numpy as np
 
 from scipy.stats import truncexpon
-from sklearn.utils import check_random_state
 
 
 class TriangularModel:
@@ -17,130 +15,200 @@ class TriangularModel:
     parameter_design : string
         The structure to impose on the parameters: either 'random',
         'direct_response' or 'basis_functions'.
-    coupling_kwargs : dict
-        A dictionary detailing the properties of the coupling parameters.
-        These may include:
-            - coupling dimension (N)
-            - coupling sparsity
-            - coupling distribution
-            - coupling distribution parameters
-    tuning_kwargs : dict
-        A dictionary detailing the properties of the tuning parameters.
-        These may include:
-            - tuning dimension (M)
-            - tuning sparsity
-            - tuning distribution
-            - tuning distribution parameters (loc, scale, low, high, etc.)
+    N : int
+        The number of coupling parameters.
+    coupling_distribution : string
+        The distribution from which to draw the coupling parameters.
+    coupling_sparsity : float
+        The fraction of coupling parameters that are set to zero.
+    coupling_loc : float
+        Specifies the location of the distribution from which the coupling
+        parameters are drawn.
+    coupling_scale : float
+        Specifies the scale of the distribution from which the coupling
+        parameters are drawn.
+    coupling_rng : {None, int, array_like[ints], SeedSequence, BitGenerator,
+                    Generator}
+        The coupling random number generator.
+    M : int
+        The number of tuning parameters.
+    tuning_distribution : string
+        The distribution from which to draw the tuning parameters.
+    tuning_sparsity : float
+        The fraction of tuning parameters that are set to zero.
+    tuning_noise_scale : float
+        Specifies the scale of noise added to the tuning parameters, if
+        desired.
+    tuning_peak : float
+        The maximum possible value of the tuning curve (relevant for Hann
+        window).
+    tuning_loc : float
+        Specifies the location of the distribution from which the tuning
+        parameters are drawn.
+    tuning_scale : float
+        Specifies the scale of the distribution from which the tuning
+        parameters are drawn.
+    tuning_low : float
+        The minimum value of the tuning parameters. Relevant for a uniform
+        tuning distribution.
+    tuning_high : float
+        The maximum value of the tuning parameters. Relevant for a uniform
+        tuning distribution.
+    tuning_bound_frac : float
+        Specifies the fraction of tuning curve that can be truncated off the
+        tuning plane.
+    tuning_diff_decay : float
+        Specifies the coupling probability decays with tuning difference.
+    tuning_bf_scale : float
+        The scale parameter for the tuning basis functions. Relevant for the
+        'basis_functions' parameter design.
+    target_pref_tuning : float
+        The preferred tuning of the target neuron. Relevant for the
+        'basis_functions' parameter design.
+    tuning_add_noise : bool
+        If True, adds noise to the tuning parameters.
+    tuning_overall_scale : float
+        Scaling factor for all tuning parameters.
+    tuning_rng : {None, int, array_like[ints], SeedSequence, BitGenerator,
+                  Generator}
+        The tuning random number generator.
+    K : int
+        The number of latent factors.
+    snr : float
+        The signal-to-noise ratio.
+    noise_structure : string
+        The structure of the latent factors.
+    corr_cluster : float
+        The correlation between neurons clusters. Relevant for 'cluster' noise
+        structure.
+    corr_back : float
+        The correlation between neurons not within cluster. Relevant for
+        'cluster' noise structure.
+    corr_max : float
+        The maximum noise correlation. Relevant for 'falloff' noise structure.
+    corr_min : float
+        The minimum noise correlation. Relevant for 'falloff' noise structure.
+    L_corr : float
+        Exponential falloff term for noise correlations.
+    stim_distribution : string
+        The distribution from which to draw the stimulus values.
     stim_kwargs : dict
-        A dictionary detailing the properties of the stimulus parameters.
-        These may include:
-            - stimulus distribution
-            - stimulus distribution parameters (loc, scale, etc.)
-    noise_kwargs : dict
-        A dictionary detailing the properties of the shared variability
-        parameters.
-        These may include:
-            - The number of latent factors.
-            - The maximum and minimum noise correlations.
-    random_state: int, RandomState instance or None, optional, default None
-        The seed of the pseudo random number generator that selects a
-        random feature to update. If int, random_state is the seed used
-        by the random number generator; If RandomState instance,
-        random_state is the random number generator; If None, the random
-        number generator is the RandomState instance used by np.random.
+        Stimulus keyword arguments. If None, it is automatically populated using
+        default values.
     """
     def __init__(
-        self, model='linear',
-        parameter_path=None,
-        parameter_design='direct_response',
-        M=50, tuning_distribution='noisy_hann_window', tuning_sparsity=0.50,
+        self, model='linear', parameter_design='direct_response', N=20,
+        coupling_distribution='symmetric_lognormal', coupling_sparsity=0.5,
+        coupling_loc=-1, coupling_scale=0.5, coupling_rng=2332, M=50,
+        tuning_distribution='noisy_hann_window', tuning_sparsity=0.50,
         tuning_noise_scale=None, tuning_peak=150, tuning_loc=0.,
         tuning_scale=1., tuning_low=0, tuning_high=1., tuning_bound_frac=0.25,
-        tuning_diff_decay=1., tuning_random_state=2332, tuning_bf_scale=None,
-        target_pref_tuning=0.5, tuning_add_noise=True, tuning_overall_scale=1.,
-        N=20, coupling_distribution='symmetric_lognormal', coupling_sparsity=0.5,
-        coupling_loc=-1, coupling_scale=0.5, coupling_random_state=2332,
-        coupling_sum=0., K=1, snr=3, noise_structure='clusters',
-        corr_cluster=0.2, corr_back=0., corr_max=0.3, corr_min=0.0, L_corr=1,
-        stim_distribution='uniform', stim_kwargs=None,
-        random_state=None
+        tuning_diff_decay=1., tuning_bf_scale=None, target_pref_tuning=0.5,
+        tuning_add_noise=True, tuning_overall_scale=1., tuning_rng=2332,
+        K=1, snr=3, noise_structure='clusters', corr_cluster=0.2,
+        corr_back=0., corr_max=0.3, corr_min=0.0, L_corr=1,
+        stim_distribution='uniform', stim_kwargs=None
     ):
         self.model = model
         self.parameter_design = parameter_design
 
-        # Check if parameters are provided in a file
-        if parameter_path is None:
-            self.tuning_kwargs, self.coupling_kwargs, self.noise_kwargs, self.stim_kwargs = \
-                TriangularModel.generate_kwargs(
-                    parameter_design=parameter_design,
-                    M=M,
-                    tuning_distribution=tuning_distribution,
-                    tuning_sparsity=tuning_sparsity,
-                    tuning_noise_scale=tuning_noise_scale,
-                    tuning_peak=tuning_peak,
-                    tuning_loc=tuning_loc,
-                    tuning_scale=tuning_scale,
-                    tuning_low=tuning_low,
-                    tuning_high=tuning_high,
-                    tuning_bound_frac=tuning_bound_frac,
-                    tuning_diff_decay=tuning_diff_decay,
-                    tuning_random_state=tuning_random_state,
-                    tuning_bf_scale=tuning_bf_scale,
-                    target_pref_tuning=target_pref_tuning,
-                    tuning_add_noise=tuning_add_noise,
-                    tuning_overall_scale=tuning_overall_scale,
-                    N=N,
-                    coupling_distribution=coupling_distribution,
-                    coupling_sparsity=coupling_sparsity,
-                    coupling_loc=coupling_loc,
-                    coupling_scale=coupling_scale,
-                    coupling_random_state=coupling_random_state,
-                    coupling_sum=coupling_sum,
-                    K=K,
-                    snr=snr,
-                    noise_structure=noise_structure,
-                    corr_cluster=corr_cluster,
-                    corr_back=corr_back,
-                    corr_max=corr_max,
-                    corr_min=corr_min,
-                    L_corr=L_corr,
-                    stim_distribution=stim_distribution,
-                    stim_kwargs=stim_kwargs
-                )
-            self.N = self.coupling_kwargs.get('N', 10)
-            self.M = self.tuning_kwargs.get('M', 10)
-            self.K = self.noise_kwargs.get('K', 1)
-            # Handle random states
-            self.coupling_kwargs['random_state'] = check_random_state(
-                self.coupling_kwargs.get('random_state', None)
-            )
-            self.tuning_kwargs['random_state'] = check_random_state(
-                self.tuning_kwargs.get('random_state', None)
-            )
-            self.noise_kwargs['random_state'] = check_random_state(
-                self.noise_kwargs.get('random_state', None)
-            )
-            self.random_state = check_random_state(random_state)
-            # Create parameters according to preferred design
-            self.a, self.b, self.B = self.generate_triangular_model()
-            self.B_all = np.concatenate((self.B, self.b), axis=1)
-            self.generate_noise_structure()
+        # Coupling keyword arguments
+        self.N = N
+        self.coupling_kwargs = {
+            'N': N,
+            'sparsity': coupling_sparsity,
+            'distribution': coupling_distribution,
+            'loc': coupling_loc,
+            'scale': coupling_scale,
+            'rng': np.random.default_rng(coupling_rng),
+        }
+
+        # Noise keyword arguments
+        if noise_structure == 'clusters':
+            self.noise_kwargs = {
+                'K': K,
+                'noise_structure': noise_structure,
+                'snr': snr,
+                'corr_back': corr_back,
+                'corr_cluster': corr_cluster
+            }
+        elif noise_structure == 'falloff':
+            self.noise_kwargs = {
+                'K': K,
+                'noise_structure': noise_structure,
+                'snr': snr,
+                'corr_max': corr_max,
+                'corr_min': corr_min,
+                'L_corr': L_corr
+            }
         else:
-            parameter_file = h5py.File(parameter_path, 'r')
-            # coupling parameters and kwargs
-            coupling = parameter_file['coupling']
-            self.a = coupling['a'][:][..., np.newaxis]
-            self.coupling_kwargs = utils.copy_attribute_dict(coupling.attrs)
-            # tuning parameters and kwargs
-            tuning = parameter_file['tuning']
-            self.b = tuning['b'][:][..., np.newaxis]
-            self.B = tuning['B'][:]
-            self.B_all = np.concatenate((self.B, self.b), axis=1)
-            self.tuning_kwargs = utils.copy_attribute_dict(tuning.attrs)
+            raise ValueError('Noise structure invalid.')
+
+        # Tuning keyword arguments
+        self.M = M
+        self.tuning_kwargs = {
+            'M': M,
+            'sparsity': tuning_sparsity,
+            'diff_decay': tuning_diff_decay,
+            'rng': np.random.default_rng(tuning_rng)
+        }
+        if tuning_noise_scale is not None:
+            self.tuning_kwargs['noise_scale'] = tuning_noise_scale
+
+        if parameter_design == 'direct_response':
+            self.tuning_kwargs['distribution'] = tuning_distribution
+            if (tuning_distribution == 'hann_window'
+                    or tuning_distribution == 'noisy_hann_window'):
+                self.tuning_kwargs['peak'] = tuning_peak
+            elif tuning_distribution == 'uniform':
+                self.tuning_kwargs['low'] = tuning_low
+                self.tuning_kwargs['high'] = tuning_high
+            else:
+                self.tuning_kwargs['loc'] = tuning_loc
+                self.tuning_kwargs['scale'] = tuning_scale
+            self.tuning_kwargs['bound_frac'] = tuning_bound_frac
+        elif parameter_design == 'basis_functions':
+            self.tuning_kwargs['target_pref_tuning'] = target_pref_tuning
+            self.tuning_kwargs['add_noise'] = tuning_add_noise
+            self.tuning_kwargs['overall_scale'] = tuning_overall_scale
+            if tuning_bf_scale is not None:
+                self.tuning_kwargs['bf_scale'] = tuning_bf_scale
+            else:
+                self.tuning_kwargs['bf_scale'] = 0.25 / self.M
+        else:
+            raise ValueError('Parameter design invalid.')
+
+        # Stimulus keyword arguments
+        self.K = K
+        if stim_kwargs is None:
+            if stim_distribution == 'uniform':
+                self.stim_kwargs = {
+                    'distribution': 'uniform',
+                    'low': 0,
+                    'high': 1
+                }
+            elif stim_distribution == 'gaussian':
+                self.stim_kwargs = {
+                    'distribution': 'gaussian',
+                    'loc': 0,
+                    'scale': 1
+                }
+            else:
+                self.stim_kwargs = {
+                    'distribution': 'uniform',
+                    'low': 0,
+                    'high': 1
+                }
+        else:
+            self.stim_kwargs['distribution'] = stim_distribution
+
+        # Create parameters according to preferred design
+        self.a, self.b, self.B = self.generate_triangular_model()
+        self.B_all = np.concatenate((self.B, self.b), axis=1)
+        self.generate_noise_structure()
 
     def generate_triangular_model(self):
-        """Generate model parameters in the triangular model according to a
-        variety of design critera.
+        """Generate model parameters in the triangular model.
 
         Returns
         -------
@@ -151,74 +219,72 @@ class TriangularModel:
         B : np.ndarray, shape (M, N)
             The non-target tuning parameters.
         """
-        # initialize parameter arrays
+        # Initialize parameter arrays
         a = np.zeros((self.N, 1))
         B_all = np.zeros((self.M, self.N + 1))
-        # calculate number of non-zero parameters using sparsity
+        # Calculate number of non-zero parameters
         n_nonzero_tuning = int((1 - self.tuning_kwargs['sparsity']) * self.M)
         n_nonzero_coupling = int((1 - self.coupling_kwargs['sparsity']) * self.N)
-        # get random states
-        coupling_random_state = self.coupling_kwargs['random_state']
-        tuning_random_state = self.tuning_kwargs['random_state']
+        # Get random states
+        coupling_rng = self.coupling_kwargs['rng']
+        tuning_rng = self.tuning_kwargs['rng']
 
-        # randomly assign selection profiles
+        # Randomly assign selection profiles
         if self.parameter_design == 'random':
-            # draw coupling parameters
+            # Draw the parameter values
             nonzero_a = self.draw_parameters(
                 size=n_nonzero_coupling,
                 **self.coupling_kwargs)
-            # draw all tuning parameters jointly
             nonzero_B_all = self.draw_parameters(
                 size=(n_nonzero_tuning, self.N + 1),
                 **self.tuning_kwargs)
-
-            # store the non-zero values
+            # Store the non-zero values
             a[:n_nonzero_coupling, 0] = nonzero_a
             B_all[:n_nonzero_tuning, :] = nonzero_B_all
-            # shuffle the parameters in place
-            coupling_random_state.shuffle(a)
-            # for tuning, we'll shuffle rows separately
-            [tuning_random_state(B_all[:, idx]) for idx in range(self.N + 1)]
+            # Shuffle the parameters in place
+            coupling_rng.shuffle(a)
+            [coupling_rng(B_all[:, idx]) for idx in range(self.N + 1)]
             b, B = np.split(B_all, [1], axis=1)
 
+        # Direct response: each parameter directly denotes the neural response
         elif self.parameter_design == 'direct_response':
             b = np.zeros((self.M, 1))
             B = np.zeros((self.M, self.N))
 
-            # draw the non-zero parameters for the target neuron
+            # Draw the non-zero parameters for the target neuron
             nonzero_b = self.draw_parameters(
                 size=n_nonzero_tuning,
                 **self.tuning_kwargs)
-            # the offset of the target tuning curve
+            # The offset of the target tuning curve
             b_offset_idx = int(0.5 * (self.M - n_nonzero_tuning))
-            # set the non-zero parameters within the tuning window
+            # Set the non-zero parameters within the tuning window
             b[b_offset_idx:b_offset_idx + n_nonzero_tuning, 0] = nonzero_b
 
-            # offsets for the non-target neuron
-            bound_frac = self.tuning_kwargs.get('bound_frac', 0.25)
+            # Offsets for the non-target neuron
+            bound_frac = self.tuning_kwargs['bound_frac']
             lower_bound = -int(bound_frac * n_nonzero_tuning)
             upper_bound = self.M - int((1 - bound_frac) * n_nonzero_tuning)
             offsets = np.linspace(lower_bound, upper_bound, self.N).astype('int')
 
-            # iterate over neurons/offsets, assigning tuning curves
+            # Iterate over neurons/offsets, assigning tuning curves
             for neuron_idx, offset in enumerate(offsets):
                 tuning_curve = self.draw_parameters(
                     size=n_nonzero_tuning,
                     **self.tuning_kwargs)
 
-                # tuning curve ends up on the left side of the tuning plane
+                # Tuning curve ends up on the left side of the tuning plane
                 if offset < 0:
                     new_offset = n_nonzero_tuning + offset
                     B[:new_offset, neuron_idx] = tuning_curve[-new_offset:]
-                # tuning curve ends up on the right side of the tuning plane
+                # Tuning curve ends up on the right side of the tuning plane
                 elif offset >= self.M - n_nonzero_tuning + 1:
                     B[offset:, neuron_idx] = tuning_curve[:(self.M - offset)]
-                # tuning curve is in the middle of the plane
+                # Tuning curve is in the middle of the plane
                 else:
                     B[offset:offset + n_nonzero_tuning, neuron_idx] = tuning_curve
 
             B_all = np.concatenate((b, B), axis=1)
-            # calculate tuning preferences
+            # Calculate tuning preferences
             self.tuning_prefs = np.insert(np.round(np.linspace(
                 int(n_nonzero_tuning / 2.),
                 self.M - int(n_nonzero_tuning / 2.),
@@ -226,50 +292,51 @@ class TriangularModel:
             a = self.generate_coupling_profile(self.tuning_prefs)
 
         elif self.parameter_design == 'basis_functions':
-            # get basis function centers and width
+            # Get basis function centers and width
             self.bf_centers = np.linspace(0, 1, self.M)
-            self.bf_scale = self.tuning_kwargs.get('bf_scale', 0.25 / self.M)
+            self.bf_scale = self.tuning_kwargs['bf_scale']
 
-            # get preferred tunings for each neuron
-            target_tuning = self.tuning_kwargs.get('target_pref_tuning', 0.5)
+            # Get preferred tunings for each neuron
+            target_tuning = self.tuning_kwargs['target_pref_tuning']
             non_target_tuning = np.linspace(0, 1, self.N)
             all_tunings = np.append(target_tuning, non_target_tuning)
 
-            # calculate differences between preferred tuning and bf locations
+            # Calculate differences between preferred tuning and bf locations
             tuning_diffs = np.abs(np.subtract.outer(self.bf_centers, all_tunings))
-            # calculate preferred tuning, with possible scaling
+            # Calculate preferred tuning, with possible scaling
             B_all = 1 - tuning_diffs
-            # apply a sigmoid to flatten coefficients
+            # Apply a sigmoid to flatten coefficients
             for idx, B in enumerate(B_all.T):
                 B_all[:, idx] = utils.sigmoid(
                     B, phase=B.mean(), b=5./(B.max() - B.min())
                 )
-            # add noise to tuning parameters if desired
-            if self.tuning_kwargs.get('add_noise', True):
-                noise = tuning_random_state.normal(
+            # Add noise to tuning parameters if desired
+            if self.tuning_kwargs['add_noise']:
+                noise = tuning_rng.normal(
                     loc=0.,
-                    scale=self.tuning_kwargs.get('noise_scale', 0.25),
+                    scale=self.tuning_kwargs['noise_scale'],
                     size=(self.M, self.N + 1))
                 B_all += noise
-            B_all = np.abs(B_all) * self.tuning_kwargs.get('scale', 1)
+            B_all = np.abs(B_all) * self.tuning_kwargs['scale']
 
-            # for each neuron, get selection profile
+            # For each neuron, get selection profile
             for idx in range(self.N + 1):
-                # get tuning differences with bfs
+                # Get tuning differences with bfs
                 tuning_diff = tuning_diffs[:, idx]
-                # choose zero indices by chance, weighted by tuning diff
+                # Choose zero indices by chance, weighted by tuning diff
                 nonzero_indices = np.argsort(tuning_diff)[:n_nonzero_tuning]
-                # set parameters to zero
+                # Set parameters to zero
                 zero_indices = np.setdiff1d(np.arange(self.M), nonzero_indices)
                 B_all[zero_indices, idx] = 0
             b, B = np.split(B_all, [1], axis=1)
-            # calculate preferred tuning for each neuron
+            # Calculate preferred tuning for each neuron
             self.tuning_prefs = utils.calculate_pref_tuning(
                 B=B_all, bf_centers=self.bf_centers, bf_scale=self.bf_scale,
                 n_stimuli=10000, limits=(0, 1)
             )
-            # generate coupling parameters
+            # Generate coupling parameters
             a = self.generate_coupling_profile(self.tuning_prefs)
+
         else:
             raise ValueError('Parameter design not available.')
         self.coupled_indices = np.argwhere(a.ravel()).ravel()
@@ -279,13 +346,13 @@ class TriangularModel:
     def generate_noise_structure(self):
         """Generates the noise covariance structure for the triangular model."""
         noise_structure = self.noise_kwargs['noise_structure']
-        snr = self.noise_kwargs.get('snr', 3)
+        snr = self.noise_kwargs['snr']
 
         # noise correlations exist in specific clusters, with increasing
         # latent dimension increasing the number of clusters
         if noise_structure == 'clusters':
-            corr_cluster = self.noise_kwargs.get('corr_cluster', 0.1)
-            corr_back = self.noise_kwargs.get('corr_back', 0.)
+            corr_cluster = self.noise_kwargs['corr_cluster']
+            corr_back = self.noise_kwargs['corr_back']
 
             # calculate non-target signal and noise variances
             non_target_signal_variance = self.non_target_signal_variance()
@@ -331,15 +398,15 @@ class TriangularModel:
         # noise correlations correspond to differences in tuning, with
         # increasing latent dimension corresponding to finer differences
         elif noise_structure == 'falloff':
-            corr_max = self.noise_kwargs.get('corr_max', 0.2)
-            corr_min = self.noise_kwargs.get('corr_min', -0.05)
+            corr_max = self.noise_kwargs['corr_max']
+            corr_min = self.noise_kwargs['corr_min']
             no_corr = (corr_max == 0) and (corr_min == 0)
             # get noise correlation structure based off tuning preferences
             noise_corr = utils.noise_correlation_matrix(
                 tuning_prefs=self.tuning_prefs,
                 corr_max=corr_max,
                 corr_min=corr_min,
-                L=self.noise_kwargs.get('L_corr', 1.),
+                L=self.noise_kwargs['L_corr'],
                 circular_stim=None)
             # separate non-target portion
             non_target_noise_corr = noise_corr[1:, 1:]
@@ -373,7 +440,7 @@ class TriangularModel:
             self.Psi = np.append(self.Psi_nt, self.Psi_t)
 
     def generate_samples(
-        self, n_samples, bin_width=0.5, random_state=None, return_noise=False
+        self, n_samples, bin_width=0.5, rng=None, return_noise=False
     ):
         """Generate samples from the triangular model.
 
@@ -383,7 +450,7 @@ class TriangularModel:
             The number of samples.
         bin_width : float
             Sets the bin width for the Poisson model.
-        random_state : RandomState or None
+        rng : RandomState or None
             The RandomState instance to draw samples with. If None, the
             RandomState instance of the class is used.
 
@@ -398,40 +465,39 @@ class TriangularModel:
         y : np.ndarray, shape (n_samples, 1)
             The target neural activity responses.
         """
-        if random_state is None:
-            random_state = self.random_state
-        else:
-            random_state = check_random_state(random_state)
-
+        rng = np.random.default_rng(rng)
+        # Draw values based off parameter design
         if self.parameter_design == 'direct_response':
             if self.stim_kwargs['distribution'] == 'uniform':
-                X = random_state.uniform(
-                    low=self.stim_kwargs['low'], high=self.stim_kwargs['high'],
+                X = rng.uniform(
+                    low=self.stim_kwargs['low'],
+                    high=self.stim_kwargs['high'],
                     size=(n_samples, self.M)
                 )
             elif self.stim_kwargs['distribution'] == 'gaussian':
-                X = random_state.normal(
-                    loc=self.stim_kwargs['loc'], scale=self.stim_kwargs['scale'],
+                X = rng.normal(
+                    loc=self.stim_kwargs['loc'],
+                    scale=self.stim_kwargs['scale'],
                     size=(n_samples, self.M)
                 )
+        # Basis functions first require drawing a stimulus value
         elif self.parameter_design == 'basis_functions':
-            # draw stimulus and tuning features
-            stimuli = random_state.uniform(low=0, high=1, size=n_samples)
+            stimuli = rng.uniform(low=0, high=1, size=n_samples)
             X = utils.calculate_tuning_features(stimuli, self.bf_centers, self.bf_scale)
 
         # draw latent activity
-        Z = random_state.normal(loc=0, scale=1.0, size=(n_samples, self.K))
+        Z = rng.normal(loc=0, scale=1.0, size=(n_samples, self.K))
 
         if self.model == 'linear':
             # non-target private variability
-            psi_nt = np.sqrt(self.Psi_nt) * random_state.normal(
+            psi_nt = np.sqrt(self.Psi_nt) * rng.normal(
                 loc=0,
                 scale=1.0,
                 size=(n_samples, self.N))
             # non-target neural activity
             Y = np.dot(X, self.B) + np.dot(Z, self.L_nt) + psi_nt
             # target private variability
-            psi_t = np.sqrt(self.Psi_t) * random_state.normal(
+            psi_t = np.sqrt(self.Psi_t) * rng.normal(
                 loc=0,
                 scale=1.0,
                 size=(n_samples, 1))
@@ -442,11 +508,11 @@ class TriangularModel:
             # non-target responses
             non_target_pre_exp = np.dot(X, self.B) + np.dot(Z, self.L)
             non_target_mu = np.exp(bin_width * non_target_pre_exp)
-            Y = random_state.poisson(lam=non_target_mu)
+            Y = rng.poisson(lam=non_target_mu)
             # target response
             target_pre_exp = np.dot(X, self.b) + np.dot(Y, self.a) + np.dot(Z, self.l_t)
             target_mu = np.exp(bin_width * target_pre_exp)
-            y = random_state.poisson(lam=target_mu)
+            y = rng.poisson(lam=target_mu)
 
         if return_noise:
             return X, Y, y, Z
@@ -469,17 +535,17 @@ class TriangularModel:
         a : np.ndarray, shape (N, 1)
             The coupling parameters.
         """
-        coupling_random_state = self.coupling_kwargs['random_state']
+        coupling_rng = self.coupling_kwargs['rng']
         n_nonzero_coupling = int((1 - self.coupling_kwargs['sparsity']) * self.N)
         # get preferred tunings
         target_tuning, non_target_tuning = np.split(tuning_prefs, [1], axis=0)
         # how quickly probability decays with tuning difference
-        tuning_diff_decay = self.tuning_kwargs.get('tuning_diff_decay', 1)
+        tuning_diff_decay = self.tuning_kwargs['diff_decay']
         # calculate and normalize probability of selecting tuning parameter
         probs = np.exp(-np.abs(non_target_tuning - target_tuning) / tuning_diff_decay)
         probs /= probs.sum()
         # determine coupled and non-coupled indices randomly
-        coupled_indices = np.sort(coupling_random_state.choice(
+        coupled_indices = np.sort(coupling_rng.choice(
             a=np.arange(self.N),
             size=n_nonzero_coupling,
             replace=False,
@@ -774,7 +840,7 @@ class TriangularModel:
         return fig, ax
 
     @staticmethod
-    def draw_parameters(distribution, size, random_state=None, **kwargs):
+    def draw_parameters(distribution, size, rng=None, **kwargs):
         """Draws parameters from a distribution according to specified
         parameter values.
 
@@ -784,12 +850,9 @@ class TriangularModel:
             The distribution to draw parameters from.
         size : tuple of ints
             The number of samples to draw, in a desired shape.
-        random_state: int, RandomState instance or None, optional, default None
+        rng: int, RandomState instance or None, optional, default None
             The seed of the pseudo random number generator that selects a
-            random feature to update. If int, random_state is the seed used by
-            the random number generator; If RandomState instance, random_state
-            is the random number generator; If None, the random number
-            generator is the RandomState instance used by np.random.
+            random feature to update.
         kwargs : dict
             Remaining arguments containing the properties of the distribution
             from which to draw parameters.
@@ -799,22 +862,22 @@ class TriangularModel:
         parameters : array-like
             the parameters drawn from the provided distribution
         """
-        random_state = check_random_state(random_state)
+        rng = np.random.default_rng(rng)
 
         if distribution == 'gaussian':
-            parameters = random_state.normal(
+            parameters = rng.normal(
                 loc=kwargs['loc'],
                 scale=kwargs['scale'],
                 size=size)
 
         elif distribution == 'laplacian':
-            parameters = random_state.laplace(
+            parameters = rng.laplace(
                 loc=kwargs['loc'],
                 scale=kwargs['scale'],
                 size=size)
 
         elif distribution == 'uniform':
-            parameters = random_state.uniform(
+            parameters = rng.uniform(
                 low=kwargs['low'],
                 high=kwargs['high'],
                 size=size)
@@ -826,23 +889,23 @@ class TriangularModel:
                 b=kwargs['high'],  # cutoff value
                 scale=kwargs['scale'],
                 size=size,
-                random_state=random_state)
+                seed=rng)
             # randomly assign each parameter to be positive or negative
-            signs = random_state.choice([-1, 1], size=size)
+            signs = rng.choice([-1, 1], size=size)
             # shift the samples and apply the sign mask
             floor = kwargs.get('floor', 0.001)
             parameters = signs * (floor + (kwargs['high'] - samples))
 
         elif distribution == 'lognormal':
-            parameters = random_state.lognormal(
+            parameters = rng.lognormal(
                 mean=kwargs['loc'],
                 sigma=kwargs['scale'],
                 size=size)
 
         elif distribution == 'symmetric_lognormal':
             # each parameter is equally likely to be positive or negative
-            signs = random_state.choice([-1, 1], size=size)
-            parameters = signs * random_state.lognormal(
+            signs = rng.choice([-1, 1], size=size)
+            parameters = signs * rng.lognormal(
                 mean=kwargs['loc'],
                 sigma=kwargs['scale'],
                 size=size)
@@ -857,7 +920,7 @@ class TriangularModel:
             indices = np.arange(1, size + 1)
             parameters = kwargs['peak'] * np.sin(np.pi * indices / (size + 1))**2
             # add noise, with scale 1/10 that of the peak value
-            noise = random_state.normal(
+            noise = rng.normal(
                 loc=0,
                 scale=kwargs.get('noise_scale', kwargs['peak'] / 10.),
                 size=size)
@@ -906,99 +969,3 @@ class TriangularModel:
             raise ValueError('Chosen distribution not available.')
 
         return variance
-
-    @staticmethod
-    def generate_kwargs(
-        parameter_design='direct_response', M=50, tuning_sparsity=0.75,
-        tuning_distribution='noisy_hann_window', tuning_noise_scale=None,
-        tuning_peak=150, tuning_loc=0., tuning_scale=1., tuning_low=0, tuning_high=1.,
-        tuning_bound_frac=0.25, tuning_diff_decay=1., tuning_random_state=2332,
-        tuning_bf_scale=None, target_pref_tuning=0.5, tuning_add_noise=True,
-        tuning_overall_scale=1., N=20, coupling_distribution='symmetric_lognormal',
-        coupling_sparsity=0.5, coupling_loc=-1, coupling_scale=0.5,
-        coupling_random_state=2332, coupling_sum=0.,
-        K=1, snr=3, noise_structure='clusters', corr_cluster=0.2, corr_back=0.,
-        corr_max=0.3, corr_min=0.0, L_corr=1, stim_distribution='uniform',
-        stim_kwargs=None
-    ):
-        """Generates a set of keyword argument dictionaries for the piecewise
-        formulated triangular model."""
-        tuning_kwargs = {
-            'M': M,
-            'sparsity': tuning_sparsity,
-            'tuning_diff_decay': tuning_diff_decay,
-            'random_state': tuning_random_state,
-        }
-        if tuning_noise_scale is not None:
-            tuning_kwargs['noise_scale'] = tuning_noise_scale
-
-        if parameter_design == 'direct_response':
-            tuning_kwargs['distribution'] = tuning_distribution
-            if tuning_distribution == 'hann_window' or tuning_distribution == 'noisy_hann_window':
-                tuning_kwargs['peak'] = tuning_peak
-            elif tuning_distribution == 'uniform':
-                tuning_kwargs['low'] = tuning_low
-                tuning_kwargs['high'] = tuning_high
-            else:
-                tuning_kwargs['loc'] = tuning_loc
-                tuning_kwargs['scale'] = tuning_scale
-
-            tuning_kwargs['bound_frac'] = tuning_bound_frac
-        elif parameter_design == 'basis_functions':
-            tuning_kwargs['target_pref_tuning'] = target_pref_tuning
-            tuning_kwargs['add_noise'] = tuning_add_noise
-            tuning_kwargs['overall_scale'] = tuning_overall_scale
-            if tuning_bf_scale is not None:
-                tuning_kwargs['bf_scale'] = tuning_bf_scale
-
-        coupling_kwargs = {
-            'N': N,
-            'sparsity': coupling_sparsity,
-            'distribution': coupling_distribution,
-            'loc': coupling_loc,
-            'scale': coupling_scale,
-            'sum': coupling_sum,
-            'random_state': coupling_random_state,
-        }
-        if noise_structure == 'clusters':
-            noise_kwargs = {
-                'K': K,
-                'noise_structure': noise_structure,
-                'snr': snr,
-                'corr_back': corr_back,
-                'corr_cluster': corr_cluster
-            }
-        elif noise_structure == 'falloff':
-            noise_kwargs = {
-                'K': K,
-                'noise_structure': noise_structure,
-                'snr': snr,
-                'corr_max': corr_max,
-                'corr_min': corr_min,
-                'L_corr': L_corr
-            }
-
-        # Stimulus keyword arguments
-        if stim_kwargs is None:
-            if stim_distribution == 'uniform':
-                stim_kwargs = {
-                    'distribution': 'uniform',
-                    'low': 0,
-                    'high': 1
-                }
-            elif stim_distribution == 'gaussian':
-                stim_kwargs = {
-                    'distribution': 'gaussian',
-                    'loc': 0,
-                    'scale': 1
-                }
-            else:
-                stim_kwargs = {
-                    'distribution': 'uniform',
-                    'low': 0,
-                    'high': 1
-                }
-        else:
-            stim_kwargs['distribution'] = stim_distribution
-
-        return tuning_kwargs, coupling_kwargs, noise_kwargs, stim_kwargs
