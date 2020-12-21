@@ -349,70 +349,70 @@ class TriangularModel:
         noise_structure = self.noise_kwargs['noise_structure']
         snr = self.noise_kwargs['snr']
 
-        # noise correlations exist in specific clusters, with increasing
+        # Noise correlations exist in specific clusters, with increasing
         # latent dimension increasing the number of clusters
         if noise_structure == 'clusters':
             corr_cluster = self.noise_kwargs['corr_cluster']
             corr_back = self.noise_kwargs['corr_back']
 
-            # calculate non-target signal and noise variances
+            # Calculate non-target signal and noise variances
             non_target_signal_variance = self.non_target_signal_variance()
             non_target_noise_variance = non_target_signal_variance / snr
-            # latent factors non-target neurons; one extra factor for now
+            # Latent factors non-target neurons; one extra factor for now
             L_nt = np.zeros((self.K + 1, self.N))
-            # one basis vector will provide the background noise correlation
+            # One basis vector will provide the background noise correlation
             L_nt[-1] = np.sqrt(corr_back * non_target_noise_variance)
-            # split up the variances into the K clusters of correlated neurons
+            # Split up the variances into the K clusters of correlated neurons
             variance_clusters = np.array_split(np.sqrt(non_target_noise_variance), self.K)
             idx_clusters = np.array_split(np.arange(self.N), self.K)
-            # iterate over the K clusters, each of which will set a latent factor
+            # Iterate over the K clusters, each of which will set a latent factor
             for lf_idx, (variances, idxs) in enumerate(zip(variance_clusters, idx_clusters)):
-                # place the correct values in the latent factor
+                # Place the correct values in the latent factor
                 L_nt[lf_idx, idxs] = variances * np.sqrt(corr_cluster - corr_back)
-            # store these for now so that we can calculate target signal var
+            # Store these for now so that we can calculate target signal var
             self.L_nt = np.copy(L_nt)
             self.Psi_nt = non_target_noise_variance - np.diag(L_nt.T @ L_nt)
 
-            # calculate latent factors and private variance for target neuron
+            # Calculate latent factors and private variance for target neuron
             target_signal_variance = self.target_signal_variance()
             target_noise_variance = target_signal_variance / snr
-            # place the target neuron in the middle group
+            # Place the target neuron in the middle group
             target_group_idx = int(np.ceil(self.K / 2 - 1))
-            # calculate target latent factor
+            # Calculate target latent factor
             l_t = np.zeros((self.K + 1, 1))
             l_t[target_group_idx] = \
                 np.sqrt(target_noise_variance) * np.sqrt(corr_cluster - corr_back)
-            # add on the background noise correlation term
+            # Add on the background noise correlation term
             l_t[-1] = np.sqrt(corr_back * target_noise_variance)
 
-            # combine latent factors and private variances
+            # Combine latent factors and private variances
             self.L = np.concatenate((l_t, L_nt), axis=1)
             self.L = utils.symmetric_low_rank_approx(self.L.T @ self.L, self.K).T
             self.l_t, self.L_nt = np.split(self.L, [1], axis=1)
-            # calculate private variances
+            # Calculate private variances
             total_noise_variance = np.insert(
                 non_target_noise_variance, 0, target_noise_variance
             )
             self.Psi = total_noise_variance - np.diag(self.L.T @ self.L)
             self.Psi_t, self.Psi_nt = np.split(self.Psi, [1], axis=0)
 
-        # noise correlations correspond to differences in tuning, with
+        # Noise correlations correspond to differences in tuning, with
         # increasing latent dimension corresponding to finer differences
         elif noise_structure == 'falloff':
             corr_max = self.noise_kwargs['corr_max']
             corr_min = self.noise_kwargs['corr_min']
             no_corr = (corr_max == 0) and (corr_min == 0)
-            # get noise correlation structure based off tuning preferences
+            # Get noise correlation structure based off tuning preferences
             noise_corr = utils.noise_correlation_matrix(
                 tuning_prefs=self.tuning_prefs,
                 corr_max=corr_max,
                 corr_min=corr_min,
                 L=self.noise_kwargs['L_corr'],
                 circular_stim=None)
-            # separate non-target portion
+            # Separate non-target portion
             non_target_noise_corr = noise_corr[1:, 1:]
 
-            # calculate latent factors and private variances for non-target neurons
+            # Calculate latent factors and private variances for non-target neurons
             non_target_signal_variance = self.non_target_signal_variance()
             non_target_noise_variance = non_target_signal_variance / snr
             non_target_noise_cov = utils.corr2cov(non_target_noise_corr,
@@ -424,7 +424,7 @@ class TriangularModel:
                 self.L_nt = np.diag(np.sqrt(lamb[-self.K:])) @ W[:, -self.K:].T
             self.Psi_nt = np.diag(non_target_noise_cov) - np.diag(self.L_nt.T @ self.L_nt)
 
-            # calculate latent factors and private variance for target neuron
+            # Calculate latent factors and private variance for target neuron
             target_signal_variance = self.target_signal_variance()
             target_noise_variance = target_signal_variance / snr
             noise_cov = utils.corr2cov(noise_corr, target_noise_variance)
@@ -436,7 +436,7 @@ class TriangularModel:
                 self.l_t = L[:, -1][..., np.newaxis]
             self.Psi_t = noise_cov[-1, -1] - (self.l_t.T @ self.l_t).item()
 
-            # combine latent factors and private variances
+            # Combine latent factors and private variances
             self.L = np.concatenate((self.L_nt, self.l_t), axis=1)
             self.Psi = np.append(self.Psi_nt, self.Psi_t)
 
@@ -451,20 +451,20 @@ class TriangularModel:
             The number of samples.
         bin_width : float
             Sets the bin width for the Poisson model.
-        rng : RandomState or None
-            The RandomState instance to draw samples with. If None, the
-            RandomState instance of the class is used.
+        rng : {None, int, array_like[ints], SeedSequence, BitGenerator,
+               Generator}
+            The random number generator or seed for the data samples.
 
         Returns
         -------
-        stimuli : np.ndarray, shape (n_samples,)
-            The stimuli that generated the samples.
         X : np.ndarray, shape (n_samples, M)
             The tuning features for each stimulus.
         Y : np.ndarray, shape (n_samples, N)
             The non-target neural activity matrix.
         y : np.ndarray, shape (n_samples, 1)
             The target neural activity responses.
+        Z : np.ndarray, shape (n_samples, K)
+            (Optional) The latent state values.
         """
         rng = np.random.default_rng(rng)
         # Draw values based off parameter design
@@ -486,31 +486,31 @@ class TriangularModel:
             stimuli = rng.uniform(low=0, high=1, size=n_samples)
             X = utils.calculate_tuning_features(stimuli, self.bf_centers, self.bf_scale)
 
-        # draw latent activity
+        # Draw latent activity
         Z = rng.normal(loc=0, scale=1.0, size=(n_samples, self.K))
 
         if self.model == 'linear':
-            # non-target private variability
+            # Non-target private variability
             psi_nt = np.sqrt(self.Psi_nt) * rng.normal(
                 loc=0,
                 scale=1.0,
                 size=(n_samples, self.N))
-            # non-target neural activity
+            # Non-target neural activity
             Y = np.dot(X, self.B) + np.dot(Z, self.L_nt) + psi_nt
-            # target private variability
+            # Target private variability
             psi_t = np.sqrt(self.Psi_t) * rng.normal(
                 loc=0,
                 scale=1.0,
                 size=(n_samples, 1))
-            # target neural activity
+            # Target neural activity
             y = np.dot(X, self.b) + np.dot(Y, self.a) + np.dot(Z, self.l_t) + psi_t
 
         elif self.model == 'poisson':
-            # non-target responses
+            # Non-target responses
             non_target_pre_exp = np.dot(X, self.B) + np.dot(Z, self.L)
             non_target_mu = np.exp(bin_width * non_target_pre_exp)
             Y = rng.poisson(lam=non_target_mu)
-            # target response
+            # Target response
             target_pre_exp = np.dot(X, self.b) + np.dot(Y, self.a) + np.dot(Z, self.l_t)
             target_mu = np.exp(bin_width * target_pre_exp)
             y = rng.poisson(lam=target_mu)
@@ -538,20 +538,20 @@ class TriangularModel:
         """
         coupling_rng = self.coupling_kwargs['rng']
         n_nonzero_coupling = int((1 - self.coupling_kwargs['sparsity']) * self.N)
-        # get preferred tunings
+        # Get preferred tunings
         target_tuning, non_target_tuning = np.split(tuning_prefs, [1], axis=0)
-        # how quickly probability decays with tuning difference
+        # How quickly probability decays with tuning difference
         tuning_diff_decay = self.tuning_kwargs['diff_decay']
-        # calculate and normalize probability of selecting tuning parameter
+        # Calculate and normalize probability of selecting tuning parameter
         probs = np.exp(-np.abs(non_target_tuning - target_tuning) / tuning_diff_decay)
         probs /= probs.sum()
-        # determine coupled and non-coupled indices randomly
+        # Determine coupled and non-coupled indices randomly
         coupled_indices = np.sort(coupling_rng.choice(
             a=np.arange(self.N),
             size=n_nonzero_coupling,
             replace=False,
             p=probs))
-        # draw coupling parameters
+        # Draw coupling parameters
         a = np.zeros((self.N, 1))
         a[coupled_indices, 0] = self.draw_parameters(
             size=n_nonzero_coupling,
@@ -566,44 +566,43 @@ class TriangularModel:
         ----------
         delta : np.ndarray, shape (K,) or (K, 1)
             The identifiability transform.
-
         update : bool
-            If true, class parameters will be updated. Otherwise, the
+            If True, class parameters will be updated. Otherwise, the
             transformed parameters will be returned.
         """
-        # make sure delta has the correct number of dimensions
+        # Make sure delta has the correct number of dimensions
         if delta.ndim == 1:
             delta = delta[..., np.newaxis]
 
-        # grab latent factors
+        # Grab latent factors
         l_t = np.copy(self.l_t)
         L_nt = np.copy(self.L_nt)
-        # grab private variances
+        # Grab private variances
         Psi_t = self.Psi_t
         Psi_nt = np.diag(self.Psi_nt)
 
-        # perturbation for coupling terms
+        # Perturbation for coupling terms
         Delta = -np.linalg.solve(Psi_nt + np.dot(L_nt.T, L_nt),
                                  np.dot(L_nt.T, delta))
-        # create augmented variables
+        # Create augmented variables
         delta_aug = delta + np.dot(L_nt, Delta)
         L_aug = l_t + np.dot(L_nt, self.a)
 
-        # correction for target private variance
+        # Correction for target private variance
         Psi_t_correction = \
             - 2 * np.dot(Delta.T, np.dot(Psi_nt, self.a)).ravel() \
             - np.dot(Delta.T, np.dot(Psi_nt, Delta)).ravel() \
             - np.dot(delta_aug.T, delta_aug) \
             - 2 * np.dot(L_aug.T, delta_aug)
 
-        # apply corrections
+        # Apply corrections
         a = self.a + Delta
         b = self.b - np.dot(self.B, Delta)
-        # private variability
+        # Private variability
         Psi_t = (Psi_t + Psi_t_correction).item()
         Psi = np.copy(self.Psi)
         Psi[0] = Psi_t
-        # latent factors
+        # Latent factors
         l_t = (self.l_t.ravel() + delta.ravel())[..., np.newaxis]
         L = np.copy(self.L)
         L[:, 0] = l_t.ravel()
@@ -793,7 +792,6 @@ class TriangularModel:
         """
         fig, ax = plot.check_fax(fax, figsize=(12, 6))
 
-        # figure out which neurons need to be plotted
         if neuron == 'all':
             to_plot = np.arange(self.N + 1)
         elif neuron == 'target':
@@ -808,7 +806,7 @@ class TriangularModel:
         if self.parameter_design == 'direct_response':
             stimuli = np.arange(self.M)
             for idx in to_plot:
-                # color of tuning curve depends on target, coupled, or non-coupled
+                # Color of tuning curve depends on target, coupled, or non-coupled
                 if idx in self.coupled_indices:
                     color = 'black'
                 elif idx in self.non_coupled_indices:
@@ -819,21 +817,20 @@ class TriangularModel:
                         color=color, marker='o', lw=3)
 
         elif self.parameter_design == 'basis_functions':
-            # get tuning curves for all neurons
+            # Get tuning curves for all neurons
             stimuli, tuning_curves = utils.calculate_tuning_curves(
                 B=self.B_all,
                 bf_centers=self.bf_centers,
                 bf_scale=self.bf_scale)
-            # iterate over tuning curves to plot
+            # Iterate over tuning curves to plot
             for idx in to_plot:
-                # color of tuning curve depends on target, coupled, or non-coupled
+                # Color of tuning curve depends on target, coupled, or non-coupled
                 if idx in self.coupled_indices:
                     color = 'black'
                 elif idx in self.non_coupled_indices:
                     color = 'gray'
                 elif idx == self.N:
                     color = 'red'
-                # plot tuning curve
                 ax.plot(stimuli,
                         tuning_curves[:, idx],
                         color=color,
@@ -883,7 +880,7 @@ class TriangularModel:
                 high=kwargs['high'],
                 size=size)
 
-        # distribution where probability density increases with magnitude
+        # Distribution where probability density increases with magnitude
         # (symmetric about zero)
         elif distribution == 'shifted_exponential':
             samples = truncexpon.rvs(
@@ -891,9 +888,9 @@ class TriangularModel:
                 scale=kwargs['scale'],
                 size=size,
                 seed=rng)
-            # randomly assign each parameter to be positive or negative
+            # Randomly assign each parameter to be positive or negative
             signs = rng.choice([-1, 1], size=size)
-            # shift the samples and apply the sign mask
+            # Shift the samples and apply the sign mask
             floor = kwargs.get('floor', 0.001)
             parameters = signs * (floor + (kwargs['high'] - samples))
 
@@ -904,19 +901,19 @@ class TriangularModel:
                 size=size)
 
         elif distribution == 'symmetric_lognormal':
-            # each parameter is equally likely to be positive or negative
+            # Each parameter is equally likely to be positive or negative
             signs = rng.choice([-1, 1], size=size)
             parameters = signs * rng.lognormal(
                 mean=kwargs['loc'],
                 sigma=kwargs['scale'],
                 size=size)
 
-        # the Hann window is a discrete squared sine over one period
+        # The Hann window is a discrete squared sine over one period
         elif distribution == 'hann_window':
             indices = np.arange(1, size + 1)
             parameters = kwargs['peak'] * np.sin(np.pi * indices / (size + 1))**2
 
-        # a Hann window, but with noise added to it
+        # A Hann window, but with noise added to it
         elif distribution == 'noisy_hann_window':
             indices = np.arange(1, size + 1)
             parameters = kwargs['peak'] * np.sin(np.pi * indices / (size + 1))**2
