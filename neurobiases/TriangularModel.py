@@ -99,7 +99,7 @@ class TriangularModel:
     def __init__(
         self, model='linear', parameter_design='direct_response', N=20,
         coupling_distribution='symmetric_lognormal', coupling_sparsity=0.5,
-        coupling_loc=-1, coupling_scale=0.5, coupling_rng=2332, M=50,
+        coupling_loc=-1, coupling_scale=0.5, coupling_rng=2332, M=20,
         tuning_distribution='noisy_hann_window', tuning_sparsity=0.50,
         tuning_noise_scale=None, tuning_peak=150, tuning_loc=0.,
         tuning_scale=1., tuning_low=0, tuning_high=1., tuning_bound_frac=0.25,
@@ -314,10 +314,11 @@ class TriangularModel:
             if self.tuning_kwargs['add_noise']:
                 noise = tuning_rng.normal(
                     loc=0.,
-                    scale=self.tuning_kwargs['noise_scale'],
+                    scale=self.tuning_kwargs.get('noise_scale',
+                                                 self.bf_scale / 5),
                     size=(self.M, self.N + 1))
                 B_all += noise
-            B_all = np.abs(B_all) * self.tuning_kwargs['scale']
+            B_all = np.abs(B_all) * self.tuning_kwargs['overall_scale']
 
             # For each neuron, get selection profile
             for idx in range(self.N + 1):
