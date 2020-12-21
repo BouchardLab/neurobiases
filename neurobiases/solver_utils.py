@@ -368,12 +368,11 @@ def cv_sparse_em_solver(
 
 def cv_sparse_em_solver_full(
     M, N, K, D, coupling_distribution, coupling_sparsities, coupling_locs,
-    coupling_scale, coupling_random_states, tuning_distribution,
-    tuning_sparsities, tuning_locs, tuning_scale, tuning_random_states,
-    corr_clusters, corr_back, dataset_random_states, coupling_lambdas,
-    tuning_lambdas, Ks, cv=5, solver='ow_lbfgs', initialization='fits',
-    max_iter=1000, tol=1e-4, refit=True, random_state=None, comm=None,
-    cv_verbose=False, em_verbose=False, mstep_verbose=False
+    coupling_scale, coupling_rngs, tuning_distribution, tuning_sparsities,
+    tuning_locs, tuning_scale, tuning_rngs, corr_clusters, corr_back,
+    dataset_rngs, coupling_lambdas, tuning_lambdas, Ks, cv=5, solver='ow_lbfgs',
+    initialization='fits', max_iter=1000, tol=1e-4, refit=True, fitter_rng=None,
+    comm=None, cv_verbose=False, em_verbose=False, mstep_verbose=False
 ):
     """Performs a cross-validated, sparse EM fit on data generated from a TM.
 
@@ -400,7 +399,7 @@ def cv_sparse_em_solver_full(
     coupling_scale : float
         The scale parameter with which to instantiate TM coupling parameters.
         This does not vary across model hyperparameters.
-    coupling_random_states : np.ndarray
+    coupling_rngs : np.ndarray
         An array of ints with which to seed the TM coupling parameters. These
         guarantee that the model can be reproduced.
     tuning_distribution : string
@@ -412,7 +411,7 @@ def cv_sparse_em_solver_full(
     tuning_scale : float
         The scale parameter with which to instantiate TM tuning parameters.
         This does not vary across model hyperparameters.
-    tuning_random_states : np.ndarray
+    tuning_rngs : np.ndarray
         An array of ints with which to seed the TM tuning parameters. These
         guarantee that the model can be reproduced.
     coupling_lambdas : np.ndarray
@@ -460,7 +459,7 @@ def cv_sparse_em_solver_full(
         size = comm.size
 
     # Number of models
-    model_idxs = np.arange(tuning_random_states.size)
+    model_idxs = np.arange(tuning_rngs.size)
     # Get CV object
     cv = check_cv(cv=cv)
     n_splits = cv.get_n_splits()
@@ -474,7 +473,7 @@ def cv_sparse_em_solver_full(
          coupling_locs,
          model_idxs,
          corr_clusters,
-         dataset_random_states,
+         dataset_rngs,
          splits,
          coupling_lambdas,
          tuning_lambdas,
@@ -504,7 +503,7 @@ def cv_sparse_em_solver_full(
                    coupling_loc,
                    model_idx,
                    corr_cluster,
-                   dataset_random_state,
+                   dataset_rng,
                    split_idx,
                    c_coupling,
                    c_tuning,
@@ -523,13 +522,12 @@ def cv_sparse_em_solver_full(
             tuning_sparsity=tuning_sparsity,
             tuning_loc=tuning_loc,
             tuning_scale=tuning_scale,
-            tuning_random_state=tuning_random_states[int(model_idx)],
+            tuning_rng=tuning_rngs[int(model_idx)],
             coupling_distribution=coupling_distribution,
             coupling_sparsity=coupling_sparsity,
             coupling_loc=coupling_loc,
             coupling_scale=coupling_scale,
-            coupling_sum=None,
-            coupling_random_state=coupling_random_states[int(model_idx)],
+            coupling_rng=coupling_rngs[int(model_idx)],
             stim_distribution='uniform'
         )
         # Store true parameters
@@ -540,8 +538,7 @@ def cv_sparse_em_solver_full(
         L[task_idx, :int(K), :] = tm.L
 
         # Generate data using seed
-        X, Y, y = tm.generate_samples(n_samples=D,
-                                      random_state=int(dataset_random_state))
+        X, Y, y = tm.generate_samples(n_samples=D, rng=int(dataset_rng))
         # Pull out the indices for the current fold
         train_idx, test_idx = list(cv.split(X))[int(split_idx)]
         X_train = X[train_idx]
@@ -563,7 +560,7 @@ def cv_sparse_em_solver_full(
             tol=tol,
             c_tuning=c_tuning,
             c_coupling=c_coupling,
-            random_state=random_state).fit_em(
+            random_state=fitter_rng).fit_em(
                 verbose=em_verbose,
                 mstep_verbose=mstep_verbose,
                 refit=refit
@@ -602,7 +599,7 @@ def cv_sparse_em_solver_full(
             coupling_locs.size,
             model_idxs.size,
             corr_clusters.size,
-            dataset_random_states.size,
+            dataset_rngs.size,
             splits.size,
             coupling_lambdas.size,
             tuning_lambdas.size,

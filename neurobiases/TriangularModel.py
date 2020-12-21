@@ -927,10 +927,6 @@ class TriangularModel:
         else:
             raise ValueError('Distribution %s not available.' % distribution)
 
-        if 'sum' in kwargs.keys():
-            if kwargs['sum'] is not None:
-                parameters += (kwargs['sum'] - parameters.sum()) / size
-
         return parameters
 
     @staticmethod

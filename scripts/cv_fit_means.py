@@ -39,37 +39,37 @@ def main(args):
     Ks = np.arange(args.max_K) + 1
 
     # Process coupling random states
-    if args.coupling_random_state == -1:
-        coupling_random_state = np.random.default_rng()
+    if args.coupling_rng == -1:
+        coupling_rng = np.random.default_rng()
     else:
-        coupling_random_state = np.random.default_rng(args.coupling_random_state)
-    coupling_random_states = coupling_random_state.integers(
+        coupling_rng = np.random.default_rng(args.coupling_rng)
+    coupling_rngs = coupling_rng.integers(
         low=0,
         high=2**32-1,
         size=n_models)
     # Process tuning random states
-    if args.tuning_random_state == -1:
-        tuning_random_state = np.random.default_rng()
+    if args.tuning_rng == -1:
+        tuning_rng = np.random.default_rng()
     else:
-        tuning_random_state = np.random.default_rng(args.tuning_random_state)
-    tuning_random_states = tuning_random_state.integers(
+        tuning_rng = np.random.default_rng(args.tuning_rng)
+    tuning_rngs = tuning_rng.integers(
         low=0,
         high=2**32-1,
         size=n_models)
     # Process dataset random states
-    if args.dataset_random_state == -1:
-        dataset_random_state = np.random.default_rng()
+    if args.dataset_rng == -1:
+        dataset_rng = np.random.default_rng()
     else:
-        dataset_random_state = np.random.default_rng(args.dataset_random_state)
-    dataset_random_states = dataset_random_state.integers(
+        dataset_rng = np.random.default_rng(args.dataset_rng)
+    dataset_rngs = dataset_rng.integers(
         low=0,
         high=2**32 - 1,
         size=n_datasets)
     # Process fitter random state
-    if args.fitter_random_state == -1:
-        fitter_random_state = None
+    if args.fitter_rng == -1:
+        fitter_rng = None
     else:
-        fitter_random_state = args.fitter_random_state
+        fitter_rng = args.fitter_rng
 
     # MPI communicator
     comm = MPI.COMM_WORLD
@@ -93,15 +93,15 @@ def main(args):
                 coupling_sparsities=np.array([args.coupling_sparsity]),
                 coupling_locs=coupling_locs,
                 coupling_scale=args.coupling_scale,
-                coupling_random_states=coupling_random_states,
+                coupling_rngs=coupling_rngs,
                 tuning_distribution=args.tuning_distribution,
                 tuning_sparsities=np.array([args.tuning_sparsity]),
                 tuning_locs=tuning_locs,
                 tuning_scale=args.tuning_scale,
-                tuning_random_states=tuning_random_states,
+                tuning_rngs=tuning_rngs,
                 corr_clusters=np.array([args.corr_cluster]),
                 corr_back=args.corr_back,
-                dataset_random_states=dataset_random_states,
+                dataset_rngs=dataset_rngs,
                 coupling_lambdas=coupling_lambdas,
                 tuning_lambdas=tuning_lambdas,
                 Ks=Ks,
@@ -115,27 +115,63 @@ def main(args):
                 cv_verbose=args.cv_verbose,
                 em_verbose=args.fitter_verbose,
                 mstep_verbose=args.mstep_verbose,
-                random_state=fitter_random_state
+                fitter_rng=fitter_rng
             )
+
         if rank == 0:
-            np.savez(
-                save_path,
-                coupling_random_states=coupling_random_states,
-                tuning_random_states=tuning_random_states,
-                dataset_random_states=dataset_random_states,
-                scores=mlls,
-                bics=bics,
-                a_est=a,
-                a_true=a_est,
-                b_est=b,
-                b_true=b_est,
-                B_est=B,
-                B_true=B_est,
-                Psi_est=Psi,
-                Psi_true=Psi_est,
-                L_est=L,
-                L_true=L_est
+            shape_key = np.array(['tuning_loc',
+                                  'coupling_loc',
+                                  'model_idx',
+                                  'dataset_idx',
+                                  'split_idx',
+                                  'coupling_lambda',
+                                  'tuning_lambda'])
+            results = h5py.File(save_path, 'w')
+            shape_key_h5 = results.create_dataset(
+                'shape_key',
+                (len(shape_key),),
+                dtype=h5py.special_dtype(vlen=str)
             )
+            shape_key_h5[:] = shape_key
+            results['coupling_rngs'] = coupling_rngs
+            results['tuning_rngs'] = tuning_rngs
+            results['dataset_rngs'] = dataset_rngs
+            results['mlls'] = np.squeeze(mlls)
+            results['bics'] = np.squeeze(bics)
+            results['a_true'] = np.squeeze(a)
+            results['a_est'] = np.squeeze(a_est)
+            results['b_true'] = np.squeeze(b)
+            results['b_est'] = np.squeeze(b_est)
+            results['B'] = np.squeeze(B)
+            results['B_est'] = np.squeeze(B_est)
+            results['Psi'] = np.squeeze(Psi)
+            results['Psi_est'] = np.squeeze(Psi_est)
+            results['L'] = np.squeeze(L, axis=(0, 2, 5))
+            results['L_est'] = np.squeeze(L_est, axis=(0, 2, 5))
+            results['coupling_locs'] = coupling_locs
+            results['tuning_locs'] = tuning_locs
+            results['coupling_lambdas'] = coupling_lambdas
+            results['tuning_lambdas'] = tuning_lambdas
+            results.attrs['model_fit'] = args.model_fit
+            results.attrs['N'] = N
+            results.attrs['M'] = M
+            results.attrs['K'] = K
+            results.attrs['D'] = D
+            results.attrs['n_datasets'] = n_datasets
+            results.attrs['n_models'] = n_models
+            results.attrs['n_splits'] = args.cv
+            results.attrs['coupling_distribution'] = args.coupling_distribution
+            results.attrs['coupling_sparsity'] = args.coupling_sparsity
+            results.attrs['coupling_scale'] = args.coupling_scale
+            results.attrs['tuning_distribution'] = args.tuning_distribution
+            results.attrs['tuning_sparsity'] = args.tuning_sparsity
+            results.attrs['tuning_scale'] = args.tuning_scale
+            results.attrs['corr_cluster'] = args.corr_cluster
+            results.attrs['corr_back'] = args.corr_back
+            results.attrs['solver'] = args.solver
+            results.attrs['initialization'] = args.initialization
+            results.attrs['max_iter'] = args.max_iter
+            results.attrs['tol'] = args.tol
 
     # Fit parameters according to TCM (using sparse TC solver)
     elif model_fit == 'tc':
@@ -146,15 +182,15 @@ def main(args):
                 coupling_sparsities=np.array([args.coupling_sparsity]),
                 coupling_locs=coupling_locs,
                 coupling_scale=args.coupling_scale,
-                coupling_random_states=coupling_random_states,
+                coupling_rngs=coupling_rngs,
                 tuning_distribution=args.tuning_distribution,
                 tuning_sparsities=np.array([args.tuning_sparsity]),
                 tuning_locs=tuning_locs,
                 tuning_scale=args.tuning_scale,
-                tuning_random_states=tuning_random_states,
+                tuning_rngs=tuning_rngs,
                 corr_clusters=np.array([args.corr_cluster]),
                 corr_back=args.corr_back,
-                dataset_random_states=dataset_random_states,
+                dataset_rngs=dataset_rngs,
                 coupling_lambdas=coupling_lambdas,
                 tuning_lambdas=tuning_lambdas,
                 cv=args.cv,
@@ -182,9 +218,9 @@ def main(args):
                 dtype=h5py.special_dtype(vlen=str)
             )
             shape_key_h5[:] = shape_key
-            results['coupling_random_states'] = coupling_random_states
-            results['tuning_random_states'] = tuning_random_states
-            results['dataset_random_states'] = dataset_random_states
+            results['coupling_rngs'] = coupling_rngs
+            results['tuning_rngs'] = tuning_rngs
+            results['dataset_rngs'] = dataset_rngs
             results['mses'] = np.squeeze(mses)
             results['bics'] = np.squeeze(bics)
             results['a_true'] = np.squeeze(a)
@@ -218,6 +254,7 @@ def main(args):
             results.attrs['initialization'] = args.initialization
             results.attrs['max_iter'] = args.max_iter
             results.attrs['tol'] = args.tol
+
     else:
         raise ValueError('Incorrect model fit input.')
 
@@ -269,10 +306,10 @@ if __name__ == '__main__':
     parser.add_argument('--tol', type=float, default=1e-8)
     parser.add_argument('--refit', action='store_true')
     # Random states
-    parser.add_argument('--coupling_random_state', type=int, default=-1)
-    parser.add_argument('--tuning_random_state', type=int, default=-1)
-    parser.add_argument('--dataset_random_state', type=int, default=-1)
-    parser.add_argument('--fitter_random_state', type=int, default=-1)
+    parser.add_argument('--coupling_rng', type=int, default=-1)
+    parser.add_argument('--tuning_rng', type=int, default=-1)
+    parser.add_argument('--dataset_rng', type=int, default=-1)
+    parser.add_argument('--fitter_rng', type=int, default=-1)
     # Verbosity flags
     parser.add_argument('--cv_verbose', action='store_true')
     parser.add_argument('--fitter_verbose', action='store_true')
