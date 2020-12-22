@@ -58,6 +58,8 @@ class TCSolver():
         elif self.initialization == 'random':
             self.a = np.random.normal(loc=0, scale=1, size=self.N)
             self.b = np.random.normal(loc=0, scale=1, size=self.M)
+        else:
+            raise ValueError('Incorrect initialization input.')
 
     def get_params(self):
         """Gets the parameter values in one vector."""

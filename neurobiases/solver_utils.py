@@ -486,9 +486,9 @@ def cv_solver_full(
     coupling_sparsities, coupling_locs, coupling_scale, coupling_rngs,
     tuning_distribution, tuning_sparsities, tuning_locs, tuning_scale,
     tuning_rngs, corr_clusters, corr_back, dataset_rngs, coupling_lambdas,
-    tuning_lambdas, Ks, cv=5, solver='ow_lbfgs', initialization='fits',
-    max_iter=1000, tol=1e-4, refit=True, fitter_rng=None, comm=None,
-    cv_verbose=False, fitter_verbose=False, mstep_verbose=False
+    tuning_lambdas, Ks=np.array([1]), cv=5, solver='ow_lbfgs',
+    initialization='fits', max_iter=1000, tol=1e-4, refit=True, fitter_rng=None,
+    comm=None, cv_verbose=False, fitter_verbose=False, mstep_verbose=False
 ):
     """Performs a cross-validated, sparse EM fit on data generated from a TM.
 
@@ -582,33 +582,61 @@ def cv_solver_full(
     # Assign tasks
     splits = np.arange(n_splits)
 
-    if method == 'em' or method == 'itsfa':
-        hyperparameters = cartesian(
-            (tuning_sparsities,
-             tuning_locs,
-             coupling_sparsities,
-             coupling_locs,
-             model_idxs,
-             corr_clusters,
-             dataset_rngs,
-             splits,
-             coupling_lambdas,
-             tuning_lambdas,
-             Ks)
-        )
+    # Set up hyperparameters
+    if method == 'em':
+        if selection == 'sparse':
+            hyperparameters = cartesian(
+                (tuning_sparsities,
+                 tuning_locs,
+                 coupling_sparsities,
+                 coupling_locs,
+                 model_idxs,
+                 corr_clusters,
+                 dataset_rngs,
+                 splits,
+                 coupling_lambdas,
+                 tuning_lambdas,
+                 Ks)
+            )
+        elif selection == 'oracle':
+            hyperparameters = cartesian(
+                (tuning_sparsities,
+                 tuning_locs,
+                 coupling_sparsities,
+                 coupling_locs,
+                 model_idxs,
+                 corr_clusters,
+                 dataset_rngs,
+                 splits,
+                 Ks)
+            )
+    elif method == 'itsfa':
+        raise NotImplementedError()
     elif method == 'tc':
-        hyperparameters = cartesian(
-            (tuning_sparsities,
-             tuning_locs,
-             coupling_sparsities,
-             coupling_locs,
-             model_idxs,
-             corr_clusters,
-             dataset_rngs,
-             splits,
-             coupling_lambdas,
-             tuning_lambdas)
-        )
+        if selection == 'sparse':
+            hyperparameters = cartesian(
+                (tuning_sparsities,
+                 tuning_locs,
+                 coupling_sparsities,
+                 coupling_locs,
+                 model_idxs,
+                 corr_clusters,
+                 dataset_rngs,
+                 splits,
+                 coupling_lambdas,
+                 tuning_lambdas)
+            )
+        elif selection == 'oracle':
+            hyperparameters = cartesian(
+                (tuning_sparsities,
+                 tuning_locs,
+                 coupling_sparsities,
+                 coupling_locs,
+                 model_idxs,
+                 corr_clusters,
+                 dataset_rngs,
+                 splits)
+            )
     tasks = np.array_split(hyperparameters, size)[rank]
     n_tasks = len(tasks)
 
@@ -645,15 +673,23 @@ def cv_solver_full(
     # Iterate over tasks for this rank
     for task_idx, values in enumerate(tasks):
         if method == 'em':
-            (tuning_sparsity, tuning_loc, coupling_sparsity, coupling_loc,
-             model_idx, corr_cluster, dataset_rng, split_idx, c_coupling,
-             c_tuning, K_cv) = values
+            if selection == 'sparse':
+                (tuning_sparsity, tuning_loc, coupling_sparsity, coupling_loc,
+                 model_idx, corr_cluster, dataset_rng, split_idx, c_coupling,
+                 c_tuning, K_cv) = values
+            elif selection == 'oracle':
+                (tuning_sparsity, tuning_loc, coupling_sparsity, coupling_loc,
+                 model_idx, corr_cluster, dataset_rng, split_idx, K_cv) = values
         elif method == 'itsfa':
             raise NotImplementedError()
         elif method == 'tc':
-            (tuning_sparsity, tuning_loc, coupling_sparsity, coupling_loc,
-             model_idx, corr_cluster, dataset_rng, split_idx, c_coupling,
-             c_tuning) = values
+            if selection == 'sparse':
+                (tuning_sparsity, tuning_loc, coupling_sparsity, coupling_loc,
+                 model_idx, corr_cluster, dataset_rng, split_idx, c_coupling,
+                 c_tuning) = values
+            elif selection == 'oracle':
+                (tuning_sparsity, tuning_loc, coupling_sparsity, coupling_loc,
+                 model_idx, corr_cluster, dataset_rng, split_idx) = values
 
         if cv_verbose:
             print(f'Rank {rank}, Task {task_idx}')
@@ -777,10 +813,7 @@ def cv_solver_full(
                     solver=solver,
                     initialization=initialization,
                     max_iter=max_iter,
-                    tol=tol).fit_lasso(
-                        refit=False,
-                        verbose=fitter_verbose
-                    )
+                    tol=tol).fit_ols()
 
             # Store parameter fits
             a_est[task_idx] = tcfit.a.ravel()
@@ -796,30 +829,58 @@ def cv_solver_full(
             stored = Gatherv_rows(stored, comm)
 
         # Reshape arrays
-        reshape = [
-            tuning_sparsities.size,
-            tuning_locs.size,
-            coupling_sparsities.size,
-            coupling_locs.size,
-            model_idxs.size,
-            corr_clusters.size,
-            dataset_rngs.size,
-            splits.size,
-            coupling_lambdas.size,
-            tuning_lambdas.size,
-            Ks.size
-        ]
-        if method == 'tc':
-            reshape = reshape[:-1]
-
-        bics.shape = reshape
-        a.shape = reshape + [-1]
-        a_est.shape = reshape + [-1]
-        b.shape = reshape + [-1]
-        b_est.shape = reshape + [-1]
-        B.shape = reshape + [M, N]
-        Psi.shape = reshape + [-1]
-        L.shape = reshape + [Ks.max(), N + 1]
+        if method == 'em':
+            if selection == 'sparse':
+                reshape = [
+                    tuning_sparsities.size,
+                    tuning_locs.size,
+                    coupling_sparsities.size,
+                    coupling_locs.size,
+                    model_idxs.size,
+                    corr_clusters.size,
+                    dataset_rngs.size,
+                    splits.size,
+                    coupling_lambdas.size,
+                    tuning_lambdas.size,
+                    Ks.size
+                ]
+            elif selection == 'oracle':
+                reshape = [
+                    tuning_sparsities.size,
+                    tuning_locs.size,
+                    coupling_sparsities.size,
+                    coupling_locs.size,
+                    model_idxs.size,
+                    corr_clusters.size,
+                    dataset_rngs.size,
+                    splits.size,
+                    Ks.size
+                ]
+        elif method == 'tc':
+            if selection == 'sparse':
+                reshape = [
+                    tuning_sparsities.size,
+                    tuning_locs.size,
+                    coupling_sparsities.size,
+                    coupling_locs.size,
+                    model_idxs.size,
+                    corr_clusters.size,
+                    dataset_rngs.size,
+                    splits.size,
+                    coupling_lambdas.size,
+                    tuning_lambdas.size,
+                ]
+            elif selection == 'oracle':
+                reshape = [
+                    tuning_sparsities.size,
+                    tuning_locs.size,
+                    coupling_sparsities.size,
+                    coupling_locs.size,
+                    model_idxs.size,
+                    corr_clusters.size,
+                    dataset_rngs.size,
+                    splits.size
+                ]
 
         if method == 'em':
             mlls.shape = reshape
@@ -829,4 +890,12 @@ def cv_solver_full(
         elif method == 'tc':
             mses.shape = reshape
 
+        bics.shape = reshape
+        a.shape = reshape + [-1]
+        a_est.shape = reshape + [-1]
+        b.shape = reshape + [-1]
+        b_est.shape = reshape + [-1]
+        B.shape = reshape + [M, N]
+        Psi.shape = reshape + [-1]
+        L.shape = reshape + [Ks.max(), N + 1]
     return storage

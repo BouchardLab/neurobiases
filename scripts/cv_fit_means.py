@@ -4,13 +4,13 @@ import numpy as np
 import time
 
 from mpi4py import MPI
-from neurobiases.solver_utils import (cv_sparse_em_solver_full,
-                                      cv_sparse_tc_solver_full)
+from neurobiases.solver_utils import cv_solver_full
 
 
 def main(args):
     save_path = args.save_path
     model_fit = args.model_fit
+    selection = args.selection
     N = args.N
     M = args.M
     K = args.K
@@ -87,7 +87,9 @@ def main(args):
     # Fit parameters according to TM (using EM)
     if model_fit == 'em':
         mlls, bics, a, a_est, b, b_est, B, B_est, Psi, Psi_est, L, L_est = \
-            cv_sparse_em_solver_full(
+            cv_solver_full(
+                method='em',
+                selection=selection,
                 M=M, N=N, K=K, D=D,
                 coupling_distribution=args.coupling_distribution,
                 coupling_sparsities=np.array([args.coupling_sparsity]),
@@ -113,7 +115,7 @@ def main(args):
                 refit=args.refit,
                 comm=comm,
                 cv_verbose=args.cv_verbose,
-                em_verbose=args.fitter_verbose,
+                fitter_verbose=args.fitter_verbose,
                 mstep_verbose=args.mstep_verbose,
                 fitter_rng=fitter_rng
             )
@@ -176,7 +178,9 @@ def main(args):
     # Fit parameters according to TCM (using sparse TC solver)
     elif model_fit == 'tc':
         mses, bics, a, a_est, b, b_est, B, Psi, L = \
-            cv_sparse_tc_solver_full(
+            cv_solver_full(
+                method='tc',
+                selection=selection,
                 M=M, N=N, K=K, D=D,
                 coupling_distribution=args.coupling_distribution,
                 coupling_sparsities=np.array([args.coupling_sparsity]),
@@ -201,7 +205,7 @@ def main(args):
                 refit=args.refit,
                 comm=comm,
                 cv_verbose=args.cv_verbose,
-                tc_verbose=args.fitter_verbose,
+                fitter_verbose=args.fitter_verbose,
             )
         if rank == 0:
             shape_key = np.array(['tuning_loc',
@@ -268,6 +272,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run CV solver on triangular model.')
     parser.add_argument('--save_path', type=str)
     parser.add_argument('--model_fit', default='em')
+    parser.add_argument('--selection', default='sparse')
     parser.add_argument('--N', type=int, default=10)
     parser.add_argument('--M', type=int, default=10)
     parser.add_argument('--K', type=int, default=1)
