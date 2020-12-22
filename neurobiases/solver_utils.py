@@ -481,7 +481,7 @@ def cv_sparse_tc_solver(
     return mses, bics, a, b
 
 
-def cv_sparse_em_solver_full(
+def cv_solver_full(
     method, selection, M, N, K, D, coupling_distribution,
     coupling_sparsities, coupling_locs, coupling_scale, coupling_rngs,
     tuning_distribution, tuning_sparsities, tuning_locs, tuning_scale,
