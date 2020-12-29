@@ -77,8 +77,13 @@ def main(args):
     rank = comm.rank
     if rank == 0:
         t0 = time.time()
-        n_total_tasks = n_coupling_locs * n_tuning_locs * n_models * n_datasets \
-            * n_coupling_lambdas * n_tuning_lambdas * Ks.size * args.cv
+        if selection == 'sparse':
+            n_total_tasks = n_coupling_locs * n_tuning_locs * n_models \
+                * n_datasets * n_coupling_lambdas * n_tuning_lambdas \
+                * Ks.size * args.cv
+        elif selection == 'oracle':
+            n_total_tasks = n_coupling_locs * n_tuning_locs * n_models \
+                * n_datasets * Ks.size * args.cv
         print('--------------------------------------------------------------')
         print(f'{size} processes running, this is rank {rank}.')
         print(f'Number of total tasks: {n_total_tasks}.')

@@ -654,8 +654,6 @@ def cv_solver_full(
         Psi_est = np.zeros((n_tasks, N + 1))
         L = np.zeros((n_tasks, K, N + 1))
         L_est = np.zeros((n_tasks, Ks.max(), N + 1))
-        storage = [mlls, bics, a, a_est, b, b_est, B, B_est, Psi, Psi_est,
-                   L, L_est]
     elif method == 'itsfa':
         raise NotImplementedError()
     elif method == 'tc':
@@ -668,7 +666,6 @@ def cv_solver_full(
         B = np.zeros((n_tasks, M, N))
         Psi = np.zeros((n_tasks, N + 1))
         L = np.zeros((n_tasks, K, N + 1))
-        storage = [mses, bics, a, a_est, b, b_est, B, Psi, L]
 
     # Iterate over tasks for this rank
     for task_idx, values in enumerate(tasks):
@@ -825,77 +822,109 @@ def cv_solver_full(
 
     if comm is not None:
         # Gather tasks across all storage arrays
-        for stored in storage:
-            stored = Gatherv_rows(stored, comm)
-
-        # Reshape arrays
         if method == 'em':
-            if selection == 'sparse':
-                reshape = [
-                    tuning_sparsities.size,
-                    tuning_locs.size,
-                    coupling_sparsities.size,
-                    coupling_locs.size,
-                    model_idxs.size,
-                    corr_clusters.size,
-                    dataset_rngs.size,
-                    splits.size,
-                    coupling_lambdas.size,
-                    tuning_lambdas.size,
-                    Ks.size
-                ]
-            elif selection == 'oracle':
-                reshape = [
-                    tuning_sparsities.size,
-                    tuning_locs.size,
-                    coupling_sparsities.size,
-                    coupling_locs.size,
-                    model_idxs.size,
-                    corr_clusters.size,
-                    dataset_rngs.size,
-                    splits.size,
-                    Ks.size
-                ]
+            mlls = Gatherv_rows(mlls, comm)
+            bics = Gatherv_rows(bics, comm)
+            a = Gatherv_rows(a, comm)
+            a_est = Gatherv_rows(a_est, comm)
+            b = Gatherv_rows(b, comm)
+            b_est = Gatherv_rows(b_est, comm)
+            B = Gatherv_rows(B, comm)
+            B_est = Gatherv_rows(B_est, comm)
+            Psi = Gatherv_rows(Psi, comm)
+            Psi_est = Gatherv_rows(Psi_est, comm)
+            L = Gatherv_rows(L, comm)
+            L_est = Gatherv_rows(L_est, comm)
+        elif method == 'itsfa':
+            raise NotImplementedError()
         elif method == 'tc':
-            if selection == 'sparse':
-                reshape = [
-                    tuning_sparsities.size,
-                    tuning_locs.size,
-                    coupling_sparsities.size,
-                    coupling_locs.size,
-                    model_idxs.size,
-                    corr_clusters.size,
-                    dataset_rngs.size,
-                    splits.size,
-                    coupling_lambdas.size,
-                    tuning_lambdas.size,
-                ]
-            elif selection == 'oracle':
-                reshape = [
-                    tuning_sparsities.size,
-                    tuning_locs.size,
-                    coupling_sparsities.size,
-                    coupling_locs.size,
-                    model_idxs.size,
-                    corr_clusters.size,
-                    dataset_rngs.size,
-                    splits.size
-                ]
+            mses = Gatherv_rows(mses, comm)
+            bics = Gatherv_rows(bics, comm)
+            a = Gatherv_rows(a, comm)
+            a_est = Gatherv_rows(a_est, comm)
+            b = Gatherv_rows(b, comm)
+            b_est = Gatherv_rows(b_est, comm)
+            B = Gatherv_rows(B, comm)
+            Psi = Gatherv_rows(Psi, comm)
+            L = Gatherv_rows(L, comm)
 
-        if method == 'em':
-            mlls.shape = reshape
-            B_est.shape = reshape + [M, N]
-            Psi_est.shape = reshape + [-1]
-            L_est.shape = reshape + [Ks.max(), N + 1]
-        elif method == 'tc':
-            mses.shape = reshape
+        if rank == 0:
+            # Reshape arrays
+            if method == 'em':
+                if selection == 'sparse':
+                    reshape = [
+                        tuning_sparsities.size,
+                        tuning_locs.size,
+                        coupling_sparsities.size,
+                        coupling_locs.size,
+                        model_idxs.size,
+                        corr_clusters.size,
+                        dataset_rngs.size,
+                        splits.size,
+                        coupling_lambdas.size,
+                        tuning_lambdas.size,
+                        Ks.size
+                    ]
+                elif selection == 'oracle':
+                    reshape = [
+                        tuning_sparsities.size,
+                        tuning_locs.size,
+                        coupling_sparsities.size,
+                        coupling_locs.size,
+                        model_idxs.size,
+                        corr_clusters.size,
+                        dataset_rngs.size,
+                        splits.size,
+                        Ks.size
+                    ]
+            elif method == 'tc':
+                if selection == 'sparse':
+                    reshape = [
+                        tuning_sparsities.size,
+                        tuning_locs.size,
+                        coupling_sparsities.size,
+                        coupling_locs.size,
+                        model_idxs.size,
+                        corr_clusters.size,
+                        dataset_rngs.size,
+                        splits.size,
+                        coupling_lambdas.size,
+                        tuning_lambdas.size,
+                    ]
+                elif selection == 'oracle':
+                    reshape = [
+                        tuning_sparsities.size,
+                        tuning_locs.size,
+                        coupling_sparsities.size,
+                        coupling_locs.size,
+                        model_idxs.size,
+                        corr_clusters.size,
+                        dataset_rngs.size,
+                        splits.size
+                    ]
 
-        bics.shape = reshape
-        a.shape = reshape + [-1]
-        a_est.shape = reshape + [-1]
-        b.shape = reshape + [-1]
-        b_est.shape = reshape + [-1]
-        B.shape = reshape + [M, N]
-        Psi.shape = reshape + [-1]
-        L.shape = reshape + [Ks.max(), N + 1]
-    return storage
+            if method == 'em':
+                mlls.shape = reshape
+                B_est.shape = reshape + [M, N]
+                Psi_est.shape = reshape + [-1]
+                L_est.shape = reshape + [Ks.max(), N + 1]
+            elif method == 'tc':
+                mses.shape = reshape
+
+            bics.shape = reshape
+            a.shape = reshape + [-1]
+            a_est.shape = reshape + [-1]
+            b.shape = reshape + [-1]
+            b_est.shape = reshape + [-1]
+            B.shape = reshape + [M, N]
+            Psi.shape = reshape + [-1]
+            L.shape = reshape + [Ks.max(), N + 1]
+
+    if method == 'em':
+        return mlls, bics, a, a_est, b, b_est, B, B_est, Psi, Psi_est, L, L_est
+    elif method == 'tc':
+        return mses, bics, a, a_est, b, b_est, B, Psi, L
+    elif method == 'itsfa':
+        raise NotImplementedError()
+    else:
+        return
