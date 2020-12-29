@@ -265,6 +265,7 @@ def main(args):
             results.attrs['initialization'] = args.initialization
             results.attrs['max_iter'] = args.max_iter
             results.attrs['tol'] = args.tol
+            results.attrs['fitter_rng'] = fitter_rng
 
     else:
         raise ValueError('Incorrect model fit input.')
