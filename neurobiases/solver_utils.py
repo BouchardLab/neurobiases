@@ -336,7 +336,7 @@ def cv_sparse_em_solver(
                 tol=tol,
                 c_tuning=c_tuning,
                 c_coupling=c_coupling,
-                random_state=random_state).fit_em(
+                rng=random_state).fit_em(
                     verbose=em_verbose,
                     mstep_verbose=mstep_verbose,
                     refit=refit
@@ -746,7 +746,7 @@ def cv_solver_full(
                     initialization=initialization,
                     max_iter=max_iter,
                     tol=tol,
-                    random_state=fitter_rng).fit_em(
+                    rng=fitter_rng).fit_em(
                         verbose=fitter_verbose,
                         mstep_verbose=mstep_verbose,
                         refit=False
@@ -763,7 +763,7 @@ def cv_solver_full(
                     tol=tol,
                     c_tuning=c_tuning,
                     c_coupling=c_coupling,
-                    random_state=fitter_rng).fit_em(
+                    rng=fitter_rng).fit_em(
                         verbose=fitter_verbose,
                         mstep_verbose=mstep_verbose,
                         refit=refit

@@ -7,7 +7,6 @@ from neurobiases import solver_utils as utils
 from scipy.optimize import minimize
 from sklearn.decomposition import FactorAnalysis
 from sklearn.linear_model import LinearRegression
-from sklearn.utils import check_random_state
 
 
 class EMSolver():
@@ -44,14 +43,14 @@ class EMSolver():
         The maximum number of optimization iterations to perform.
     tol : float
         The tolerance with which the cease optimization.
-    random_state : RandomState or int or None
+    rng  : RandomState or int or None
         RandomState object, or int to create RandomState object.
     """
     def __init__(
         self, X, Y, y, K, a_mask=None, b_mask=None, B_mask=None,
         B=None, L_nt=None, L=None, Psi_nt=None, Psi=None, Psi_transform='softplus',
         solver='scipy_lbfgs', max_iter=1000, tol=1e-4, c_tuning=0., c_coupling=0.,
-        initialization='zeros', random_state=None
+        initialization='zeros', rng=None
     ):
         # tuning and coupling design matrices
         self.X = X
@@ -76,7 +75,7 @@ class EMSolver():
         else:
             self.c_coupling = c_coupling
             self.c_tuning = c_tuning
-        self.random_state = check_random_state(random_state)
+        self.rng = np.random.default_rng(rng)
 
         # initialize masks
         self.set_masks(a_mask=a_mask, b_mask=b_mask, B_mask=B_mask)
@@ -97,7 +96,7 @@ class EMSolver():
             self.b = np.zeros((self.M, 1))
             self.B = np.zeros((self.M, self.N))
             self.Psi_tr = np.zeros(self.N + 1)
-            self.L = self.random_state.normal(loc=0., scale=0.1, size=(self.K, self.N + 1))
+            self.L = self.rng.normal(loc=0., scale=0.1, size=(self.K, self.N + 1))
         elif initialization == 'fits':
             # initialize parameter estimates via fits
             # coupling fit
@@ -694,6 +693,8 @@ class EMSolver():
                                  one_end=one_end,
                                  verbose=verbose,
                                  args=args)
+        else:
+            raise ValueError(f'Solver {self.solver} not available.')
 
         return params
 
@@ -742,7 +743,6 @@ class EMSolver():
                                  fista_max_iter=fista_max_iter,
                                  fista_lr=fista_lr)
             self.a, self.b, self.B, self.Psi_tr, self.L = self.split_params(params)
-
             iteration += 1
             # update marginal log-likelihood
             current_mll = self.marginal_log_likelihood()

@@ -121,13 +121,20 @@ def main(args):
             )
 
         if rank == 0:
-            shape_key = np.array(['tuning_loc',
-                                  'coupling_loc',
-                                  'model_idx',
-                                  'dataset_idx',
-                                  'split_idx',
-                                  'coupling_lambda',
-                                  'tuning_lambda'])
+            if selection == 'sparse':
+                shape_key = np.array(['tuning_loc',
+                                      'coupling_loc',
+                                      'model_idx',
+                                      'dataset_idx',
+                                      'split_idx',
+                                      'coupling_lambda',
+                                      'tuning_lambda'])
+            elif selection == 'oracle':
+                shape_key = np.array(['tuning_loc',
+                                      'coupling_loc',
+                                      'model_idx',
+                                      'dataset_idx',
+                                      'split_idx'])
             results = h5py.File(save_path, 'w')
             shape_key_h5 = results.create_dataset(
                 'shape_key',
@@ -140,9 +147,9 @@ def main(args):
             results['dataset_rngs'] = dataset_rngs
             results['mlls'] = np.squeeze(mlls)
             results['bics'] = np.squeeze(bics)
-            results['a_true'] = np.squeeze(a)
+            results['a'] = np.squeeze(a)
             results['a_est'] = np.squeeze(a_est)
-            results['b_true'] = np.squeeze(b)
+            results['b'] = np.squeeze(b)
             results['b_est'] = np.squeeze(b_est)
             results['B'] = np.squeeze(B)
             results['B_est'] = np.squeeze(B_est)
@@ -310,7 +317,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_iter', type=int, default=500)
     parser.add_argument('--tol', type=float, default=1e-8)
     parser.add_argument('--refit', action='store_true')
-    # Random states
+    # Random seeds
     parser.add_argument('--coupling_rng', type=int, default=-1)
     parser.add_argument('--tuning_rng', type=int, default=-1)
     parser.add_argument('--dataset_rng', type=int, default=-1)
