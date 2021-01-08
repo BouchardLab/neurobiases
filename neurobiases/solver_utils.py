@@ -611,7 +611,20 @@ def cv_solver_full(
                  Ks)
             )
     elif method == 'itsfa':
-        raise NotImplementedError()
+        if selection == 'sparse':
+            raise NotImplementedError()
+        elif selection == 'oracle':
+            hyperparameters = cartesian(
+                (tuning_sparsities,
+                 tuning_locs,
+                 coupling_sparsities,
+                 coupling_locs,
+                 model_idxs,
+                 corr_clusters,
+                 dataset_rngs,
+                 splits,
+                 Ks)
+            )
     elif method == 'tc':
         if selection == 'sparse':
             hyperparameters = cartesian(
@@ -655,7 +668,16 @@ def cv_solver_full(
         L = np.zeros((n_tasks, K, N + 1))
         L_est = np.zeros((n_tasks, Ks.max(), N + 1))
     elif method == 'itsfa':
-        raise NotImplementedError()
+        mses = np.zeros(n_tasks)
+        bics = np.zeros(n_tasks)
+        a = np.zeros((n_tasks, N))
+        a_est = np.zeros((n_tasks, N))
+        b = np.zeros((n_tasks, M))
+        b_est = np.zeros((n_tasks, M))
+        B = np.zeros((n_tasks, M, N))
+        B_est = np.zeros((n_tasks, M, N))
+        Psi = np.zeros((n_tasks, N + 1))
+        L = np.zeros((n_tasks, K, N + 1))
     elif method == 'tc':
         mses = np.zeros(n_tasks)
         bics = np.zeros(n_tasks)
@@ -678,7 +700,11 @@ def cv_solver_full(
                 (tuning_sparsity, tuning_loc, coupling_sparsity, coupling_loc,
                  model_idx, corr_cluster, dataset_rng, split_idx, K_cv) = values
         elif method == 'itsfa':
-            raise NotImplementedError()
+            if selection == 'sparse':
+                raise NotImplementedError()
+            elif selection == 'oracle':
+                (tuning_sparsity, tuning_loc, coupling_sparsity, coupling_loc,
+                 model_idx, corr_cluster, dataset_rng, split_idx, K_cv) = values
         elif method == 'tc':
             if selection == 'sparse':
                 (tuning_sparsity, tuning_loc, coupling_sparsity, coupling_loc,
@@ -731,7 +757,7 @@ def cv_solver_full(
         # Run the sparse fitter
         if method == 'em':
             if selection == 'oracle':
-                emfit = EMSolver.EMSolver(
+                fitter = EMSolver.EMSolver(
                     X=X_train,
                     Y=Y_train,
                     y=y_train,
@@ -749,7 +775,7 @@ def cv_solver_full(
                         refit=False
                     )
             elif selection == 'sparse':
-                emfit = EMSolver.EMSolver(
+                fitter = EMSolver.EMSolver(
                     X=X_train,
                     Y=Y_train,
                     y=y_train,
@@ -767,27 +793,37 @@ def cv_solver_full(
                     )
 
             # Store parameter fits
-            a_est[task_idx] = emfit.a.ravel()
-            b_est[task_idx] = emfit.b.ravel()
-            B_est[task_idx] = emfit.B
-            Psi_est[task_idx] = emfit.Psi_tr_to_Psi()
-            L_est[task_idx, :int(K), :] = emfit.L
+            a_est[task_idx] = fitter.a.ravel()
+            b_est[task_idx] = fitter.b.ravel()
+            B_est[task_idx] = fitter.B
+            Psi_est[task_idx] = fitter.Psi_tr_to_Psi()
+            L_est[task_idx, :int(K), :] = fitter.L
             # Score the resulting fit
-            mlls[task_idx] = emfit.marginal_log_likelihood(
+            mlls[task_idx] = fitter.marginal_log_likelihood(
                 X=X_test,
                 Y=Y_test,
                 y=y_test
             )
             # Calculate BIC
-            bics[task_idx] = emfit.bic()
+            bics[task_idx] = fitter.bic()
 
         elif method == 'itsfa':
-            raise NotImplementedError()
+            if selection == 'sparse':
+                raise NotImplementedError()
+            elif selection == 'oracle':
+                fitter = ITSFASolver.ITSFASolver(
+                    X=X_train,
+                    Y=Y_train,
+                    y=y_train,
+                    B=None,
+                    a_mask=tm.a.ravel() != 0,
+                    b_mask=tm.b.ravel() != 0
+                ).fit_itsfa(K=K_cv, max_iter=50)
 
         elif method == 'tc':
             if selection == 'sparse':
                 # Run the sparse fitter
-                tcfit = TCSolver.TCSolver(
+                fitter = TCSolver.TCSolver(
                     X=X_train,
                     Y=Y_train,
                     y=y_train,
@@ -801,7 +837,7 @@ def cv_solver_full(
                         verbose=fitter_verbose
                     )
             elif selection == 'oracle':
-                tcfit = TCSolver.TCSolver(
+                fitter = TCSolver.TCSolver(
                     X=X_train,
                     Y=Y_train,
                     y=y_train,
@@ -813,12 +849,12 @@ def cv_solver_full(
                     tol=tol).fit_ols()
 
             # Store parameter fits
-            a_est[task_idx] = tcfit.a.ravel()
-            b_est[task_idx] = tcfit.b.ravel()
+            a_est[task_idx] = fitter.a.ravel()
+            b_est[task_idx] = fitter.b.ravel()
             # Score the resulting fit
-            mses[task_idx] = tcfit.mse(X=X_test, Y=Y_test, y=y_test)
+            mses[task_idx] = fitter.mse(X=X_test, Y=Y_test, y=y_test)
             # Calculate BIC
-            bics[task_idx] = tcfit.bic()
+            bics[task_idx] = fitter.bic()
 
     if comm is not None:
         # Gather tasks across all storage arrays
