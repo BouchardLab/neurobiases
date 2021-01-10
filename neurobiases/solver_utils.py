@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from . import EMSolver, TCSolver, TriangularModel
+from . import EMSolver, ITSFASolver, TCSolver, TriangularModel
 from .utils import inv_softplus
 from sklearn.model_selection import check_cv
 from sklearn.utils.extmath import cartesian

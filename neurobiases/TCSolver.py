@@ -121,10 +121,9 @@ class TCSolver():
         ols = LinearRegression(fit_intercept=False)
         ols.fit(Z, self.y.ravel())
         # Extract fits into class variables
-        self.b[self.b_mask], self.a[self.a_mask] = np.split(
-            ols.coef_,
-            [self.n_nonzero_tuning]
-        )
+        b_est, a_est = np.split(ols.coef_, [self.n_nonzero_tuning])
+        self.a[self.a_mask] = a_est
+        self.b[self.b_mask] = b_est
         return self
 
     def fit_nnls(self):

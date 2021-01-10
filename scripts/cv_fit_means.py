@@ -152,15 +152,15 @@ def main(args):
             results['dataset_rngs'] = dataset_rngs
             results['mlls'] = np.squeeze(mlls)
             results['bics'] = np.squeeze(bics)
-            results['a'] = np.squeeze(a)
+            results['a_true'] = np.squeeze(a)
             results['a_est'] = np.squeeze(a_est)
-            results['b'] = np.squeeze(b)
+            results['b_true'] = np.squeeze(b)
             results['b_est'] = np.squeeze(b_est)
-            results['B'] = np.squeeze(B)
+            results['B_true'] = np.squeeze(B)
             results['B_est'] = np.squeeze(B_est)
-            results['Psi'] = np.squeeze(Psi)
+            results['Psi_true'] = np.squeeze(Psi)
             results['Psi_est'] = np.squeeze(Psi_est)
-            results['L'] = np.squeeze(L, axis=(0, 2, 5))
+            results['L_true'] = np.squeeze(L, axis=(0, 2, 5))
             results['L_est'] = np.squeeze(L_est, axis=(0, 2, 5))
             results['coupling_locs'] = coupling_locs
             results['tuning_locs'] = tuning_locs
@@ -186,6 +186,10 @@ def main(args):
             results.attrs['initialization'] = args.initialization
             results.attrs['max_iter'] = args.max_iter
             results.attrs['tol'] = args.tol
+            results.attrs['coupling_rng'] = args.coupling_rng
+            results.attrs['tuning_rng'] = args.tuning_rng
+            results.attrs['dataset_rng'] = args.dataset_rng
+            results.attrs['fitter_rng'] = fitter_rng
 
     # Fit parameters according to TCM (using sparse TC solver)
     elif model_fit == 'tc':
@@ -220,13 +224,21 @@ def main(args):
                 fitter_verbose=args.fitter_verbose,
             )
         if rank == 0:
-            shape_key = np.array(['tuning_loc',
-                                  'coupling_loc',
-                                  'model_idx',
-                                  'dataset_idx',
-                                  'split_idx',
-                                  'coupling_lambda',
-                                  'tuning_lambda'])
+            if selection == 'sparse':
+                shape_key = np.array(['tuning_loc',
+                                      'coupling_loc',
+                                      'model_idx',
+                                      'dataset_idx',
+                                      'split_idx',
+                                      'coupling_lambda',
+                                      'tuning_lambda'])
+            elif selection == 'oracle':
+                shape_key = np.array(['tuning_loc',
+                                      'coupling_loc',
+                                      'model_idx',
+                                      'dataset_idx',
+                                      'split_idx'])
+
             results = h5py.File(save_path, 'w')
             shape_key_h5 = results.create_dataset(
                 'shape_key',
@@ -243,9 +255,9 @@ def main(args):
             results['a_est'] = np.squeeze(a_est)
             results['b_true'] = np.squeeze(b)
             results['b_est'] = np.squeeze(b_est)
-            results['B'] = np.squeeze(B)
+            results['B_true'] = np.squeeze(B)
             results['Psi'] = np.squeeze(Psi)
-            results['L'] = np.squeeze(L, axis=(0, 2, 5))
+            results['L_true'] = np.squeeze(L, axis=(0, 2, 5))
             results['coupling_locs'] = coupling_locs
             results['tuning_locs'] = tuning_locs
             results['coupling_lambdas'] = coupling_lambdas
@@ -270,6 +282,9 @@ def main(args):
             results.attrs['initialization'] = args.initialization
             results.attrs['max_iter'] = args.max_iter
             results.attrs['tol'] = args.tol
+            results.attrs['coupling_rng'] = args.coupling_rng
+            results.attrs['tuning_rng'] = args.tuning_rng
+            results.attrs['dataset_rng'] = args.dataset_rng
             results.attrs['fitter_rng'] = fitter_rng
 
     else:
