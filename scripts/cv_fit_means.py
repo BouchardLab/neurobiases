@@ -222,6 +222,7 @@ def main(args):
                 comm=comm,
                 cv_verbose=args.cv_verbose,
                 fitter_verbose=args.fitter_verbose,
+                fitter_rng=fitter_rng
             )
         if rank == 0:
             if selection == 'sparse':
@@ -256,7 +257,7 @@ def main(args):
             results['b_true'] = np.squeeze(b)
             results['b_est'] = np.squeeze(b_est)
             results['B_true'] = np.squeeze(B)
-            results['Psi'] = np.squeeze(Psi)
+            results['Psi_true'] = np.squeeze(Psi)
             results['L_true'] = np.squeeze(L, axis=(0, 2, 5))
             results['coupling_locs'] = coupling_locs
             results['tuning_locs'] = tuning_locs

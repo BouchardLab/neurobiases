@@ -769,7 +769,8 @@ def cv_solver_full(
                     initialization=initialization,
                     max_iter=max_iter,
                     tol=tol,
-                    rng=fitter_rng).fit_em(
+                    rng=fitter_rng,
+                    fa_rng=2332).fit_em(
                         verbose=fitter_verbose,
                         mstep_verbose=mstep_verbose,
                         refit=False
@@ -786,7 +787,8 @@ def cv_solver_full(
                     tol=tol,
                     c_tuning=c_tuning,
                     c_coupling=c_coupling,
-                    rng=fitter_rng).fit_em(
+                    rng=fitter_rng,
+                    fa_rng=2332).fit_em(
                         verbose=fitter_verbose,
                         mstep_verbose=mstep_verbose,
                         refit=refit
@@ -832,7 +834,8 @@ def cv_solver_full(
                     c_coupling=c_coupling,
                     initialization=initialization,
                     max_iter=max_iter,
-                    tol=tol).fit_lasso(
+                    tol=tol,
+                    rng=fitter_rng).fit_lasso(
                         refit=refit,
                         verbose=fitter_verbose
                     )
@@ -846,7 +849,8 @@ def cv_solver_full(
                     solver=solver,
                     initialization=initialization,
                     max_iter=max_iter,
-                    tol=tol).fit_ols()
+                    tol=tol,
+                    rng=fitter_rng).fit_ols()
 
             # Store parameter fits
             a_est[task_idx] = fitter.a.ravel()

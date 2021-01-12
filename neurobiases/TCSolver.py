@@ -25,19 +25,22 @@ class TCSolver():
     def __init__(
         self, X, Y, y, a_mask=None, b_mask=None, solver='ow_lbfgs', c_tuning=0.,
         c_coupling=0., initialization='random', max_iter=1000, tol=1e-4,
+        rng=None
     ):
-        # tuning and coupling design matrices
+        # Tuning and coupling design matrices
         self.X = X
         self.Y = Y
-        # response vector
+        # Response vector
         self.y = y
-        # initialize parameter estimates
+        # Random number generator
+        self.rng = np.random.default_rng(rng)
+        # Initialize parameter estimates
         self.initialization = initialization
         self._init_params()
         # Other settings
         self.max_iter = max_iter
         self.tol = tol
-        # initialize masks
+        # Initialize masks
         self.set_masks(a_mask=a_mask, b_mask=b_mask)
         # Optimization parameters
         self.solver = solver
@@ -56,8 +59,8 @@ class TCSolver():
             self.a = np.zeros(self.N)
             self.b = np.zeros(self.M)
         elif self.initialization == 'random':
-            self.a = np.random.normal(loc=0, scale=1, size=self.N)
-            self.b = np.random.normal(loc=0, scale=1, size=self.M)
+            self.a = self.rng.normal(loc=0, scale=1, size=self.N)
+            self.b = self.rng.normal(loc=0, scale=1, size=self.M)
         else:
             raise ValueError('Incorrect initialization input.')
 

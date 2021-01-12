@@ -50,7 +50,7 @@ class EMSolver():
         self, X, Y, y, K, a_mask=None, b_mask=None, B_mask=None,
         B=None, L_nt=None, L=None, Psi_nt=None, Psi=None, Psi_transform='softplus',
         solver='scipy_lbfgs', max_iter=1000, tol=1e-4, c_tuning=0., c_coupling=0.,
-        initialization='zeros', rng=None
+        initialization='zeros', rng=None, fa_rng=None
     ):
         # tuning and coupling design matrices
         self.X = X
@@ -76,7 +76,7 @@ class EMSolver():
             self.c_coupling = c_coupling
             self.c_tuning = c_tuning
         self.rng = np.random.default_rng(rng)
-
+        self.fa_rng = fa_rng
         # initialize masks
         self.set_masks(a_mask=a_mask, b_mask=b_mask, B_mask=B_mask)
         # initialize parameter estimates
@@ -97,6 +97,7 @@ class EMSolver():
             self.B = np.zeros((self.M, self.N))
             self.Psi_tr = np.zeros(self.N + 1)
             self.L = self.rng.normal(loc=0., scale=0.1, size=(self.K, self.N + 1))
+
         elif initialization == 'fits':
             # initialize parameter estimates via fits
             # coupling fit
@@ -129,10 +130,13 @@ class EMSolver():
             y_res = self.y.ravel() - np.dot(Z, tc_fit.coef_)
             residuals = np.concatenate((y_res[..., np.newaxis], Y_res), axis=1)
             # run factor analysis on residuals
-            fa = FactorAnalysis(n_components=self.K)
+            fa = FactorAnalysis(n_components=self.K, random_state=self.fa_rng)
             fa.fit(residuals)
             self.L = fa.components_
             self.Psi_tr = self.Psi_to_Psi_tr(fa.noise_variance_)
+
+        else:
+            raise ValueError('Incorrect initialization specified.')
 
     def set_masks(self, a_mask=None, b_mask=None, B_mask=None):
         """Initialize masks. A value of None indicates that all features will
