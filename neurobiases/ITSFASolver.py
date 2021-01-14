@@ -261,3 +261,65 @@ class ITSFASolver():
         self.a = self.a_iters[self.n_iterations]
         self.b = self.b_iters[self.n_iterations]
         return self
+
+    def mse(self, X=None, Y=None, y=None):
+        """Calculate the mean-squared error given the fitted parameters, either
+        on the initialized dataset, or a new one.
+
+        Parameters
+        ----------
+        X : np.ndarray, shape (D, M)
+            Design matrix for tuning features.
+        Y : np.ndarray, shape (D, N)
+            Design matrix for coupling features.
+        y : np.ndarray, shape (D, 1)
+            Neural response vector.
+
+        Returns
+        -------
+        mse : float
+            The mean-squared error.
+        """
+        # If no data is provided, use the data in the object
+        if X is None:
+            X = self.X
+        if Y is None:
+            Y = self.Y
+        if y is None:
+            y = self.y
+        # Calculate mean squared error
+        mse = np.sum((y.ravel() - X @ self.b - Y @ self.a)**2)
+        return mse
+
+    def bic(self, X=None, Y=None, y=None):
+        """Calculates the Bayesian information criterion on the neural data.
+
+        Parameters
+        ----------
+        X : np.ndarray, shape (D, M)
+            Design matrix for tuning features.
+        Y : np.ndarray, shape (D, N)
+            Design matrix for coupling features.
+        y : np.ndarray, shape (D, 1)
+            Neural response vector.
+
+        Returns
+        -------
+        bic : float
+            The Bayesian information criterion.
+        """
+        # If no data is provided, use the data in the object
+        if X is None:
+            X = self.X
+        if Y is None:
+            Y = self.Y
+        if y is None:
+            y = self.y
+
+        D = X.shape[0]
+        # Calculate mean squared error
+        mse = -self.mse(X=X, Y=Y, y=y)
+        # Add in penalty for model size
+        k = np.count_nonzero(self.a) + np.count_nonzero(self.b)
+        bic = -2 * mse + k * np.log(D)
+        return bic

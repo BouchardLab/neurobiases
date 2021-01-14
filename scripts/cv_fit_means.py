@@ -191,6 +191,94 @@ def main(args):
             results.attrs['dataset_rng'] = args.dataset_rng
             results.attrs['fitter_rng'] = fitter_rng
 
+    elif model_fit == 'itsfa':
+        mses, bics, a, a_est, b, b_est, B, B_est, Psi, L = \
+            cv_solver_full(
+                method='itsfa',
+                selection=selection,
+                M=M, N=N, K=K, D=D,
+                coupling_distribution=args.coupling_distribution,
+                coupling_sparsities=np.array([args.coupling_sparsity]),
+                coupling_locs=coupling_locs,
+                coupling_scale=args.coupling_scale,
+                coupling_rngs=coupling_rngs,
+                tuning_distribution=args.tuning_distribution,
+                tuning_sparsities=np.array([args.tuning_sparsity]),
+                tuning_locs=tuning_locs,
+                tuning_scale=args.tuning_scale,
+                tuning_rngs=tuning_rngs,
+                corr_clusters=np.array([args.corr_cluster]),
+                corr_back=args.corr_back,
+                dataset_rngs=dataset_rngs,
+                coupling_lambdas=coupling_lambdas,
+                tuning_lambdas=tuning_lambdas,
+                cv=args.cv,
+                solver=args.solver,
+                initialization=args.initialization,
+                max_iter=args.max_iter,
+                tol=args.tol,
+                refit=args.refit,
+                comm=comm,
+                cv_verbose=args.cv_verbose,
+                fitter_verbose=args.fitter_verbose,
+                fitter_rng=fitter_rng
+            )
+
+        if rank == 0:
+            if selection == 'sparse':
+                raise NotImplementedError()
+            elif selection == 'oracle':
+                shape_key = np.array(['tuning_loc',
+                                      'coupling_loc',
+                                      'model_idx',
+                                      'dataset_idx',
+                                      'split_idx'])
+            results = h5py.File(save_path, 'w')
+            shape_key_h5 = results.create_dataset(
+                'shape_key',
+                (len(shape_key),),
+                dtype=h5py.special_dtype(vlen=str)
+            )
+            shape_key_h5[:] = shape_key
+            results['coupling_rngs'] = coupling_rngs
+            results['tuning_rngs'] = tuning_rngs
+            results['dataset_rngs'] = dataset_rngs
+            results['mses'] = np.squeeze(mses)
+            results['bics'] = np.squeeze(bics)
+            results['a_true'] = np.squeeze(a)
+            results['a_est'] = np.squeeze(a_est)
+            results['b_true'] = np.squeeze(b)
+            results['b_est'] = np.squeeze(b_est)
+            results['B_true'] = np.squeeze(B)
+            results['B_est'] = np.squeeze(B_est)
+            results['Psi_true'] = np.squeeze(Psi)
+            results['L_true'] = np.squeeze(L, axis=(0, 2, 5))
+            results['coupling_locs'] = coupling_locs
+            results['tuning_locs'] = tuning_locs
+            results['coupling_lambdas'] = coupling_lambdas
+            results['tuning_lambdas'] = tuning_lambdas
+            results.attrs['model_fit'] = args.model_fit
+            results.attrs['N'] = N
+            results.attrs['M'] = M
+            results.attrs['K'] = K
+            results.attrs['D'] = D
+            results.attrs['n_datasets'] = n_datasets
+            results.attrs['n_models'] = n_models
+            results.attrs['n_splits'] = args.cv
+            results.attrs['coupling_distribution'] = args.coupling_distribution
+            results.attrs['coupling_sparsity'] = args.coupling_sparsity
+            results.attrs['coupling_scale'] = args.coupling_scale
+            results.attrs['tuning_distribution'] = args.tuning_distribution
+            results.attrs['tuning_sparsity'] = args.tuning_sparsity
+            results.attrs['tuning_scale'] = args.tuning_scale
+            results.attrs['corr_cluster'] = args.corr_cluster
+            results.attrs['corr_back'] = args.corr_back
+            results.attrs['max_iter'] = args.max_iter
+            results.attrs['tol'] = args.tol
+            results.attrs['coupling_rng'] = args.coupling_rng
+            results.attrs['tuning_rng'] = args.tuning_rng
+            results.attrs['dataset_rng'] = args.dataset_rng
+
     # Fit parameters according to TCM (using sparse TC solver)
     elif model_fit == 'tc':
         mses, bics, a, a_est, b, b_est, B, Psi, L = \
@@ -302,13 +390,14 @@ if __name__ == '__main__':
     parser.add_argument('--save_path', type=str)
     parser.add_argument('--model_fit', default='em')
     parser.add_argument('--selection', default='sparse')
+    # Fixed model hyperparameters
     parser.add_argument('--N', type=int, default=10)
     parser.add_argument('--M', type=int, default=10)
     parser.add_argument('--K', type=int, default=1)
     parser.add_argument('--D', type=int, default=1000)
     parser.add_argument('--n_datasets', type=int, default=10)
     parser.add_argument('--n_models', type=int, default=10)
-    # Model hyperparameters
+    # Variable model hyperparameters
     parser.add_argument('--n_coupling_locs', type=int, default=30)
     parser.add_argument('--coupling_loc_min', type=float, default=-3)
     parser.add_argument('--coupling_loc_max', type=float, default=3)

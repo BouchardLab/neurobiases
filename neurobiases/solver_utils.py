@@ -1,7 +1,10 @@
 import numpy as np
 import torch
 
-from . import EMSolver, ITSFASolver, TCSolver, TriangularModel
+from .EMSolver import EMSolver
+from .ITSFASolver import ITSFASolver
+from .TCSolver import TCSolver
+from .TriangularModel import TriangularModel
 from .utils import inv_softplus
 from sklearn.model_selection import check_cv
 from sklearn.utils.extmath import cartesian
@@ -327,7 +330,7 @@ def cv_sparse_em_solver(
                 print(f'Rank {rank}: fold = {split_idx + 1}',
                       f'coupling = {c_coupling}, tuning = {c_tuning}, K = {K}')
             # run the sparse fitter
-            emfit = EMSolver.EMSolver(
+            emfit = EMSolver(
                 X=X_train, Y=Y_train, y=y_train,
                 K=int(K),
                 solver=solver,
@@ -453,7 +456,7 @@ def cv_sparse_tc_solver(
                 print(f'Rank {rank}: fold = {split_idx + 1}',
                       f'coupling = {c_coupling}, tuning = {c_tuning}')
             # run the sparse fitter
-            tcfit = TCSolver.TCSolver(
+            tcfit = TCSolver(
                 X=X_train,
                 Y=Y_train,
                 y=y_train,
@@ -546,25 +549,51 @@ def cv_solver_full(
         The maximum number of EM iterations.
     tol : float
         The convergence criteria for coordinate descent.
+    refit : bool
+        Whether to refit the optimization without the sparse solver. If using
+        oracle selection, this option is ignored.
+    fitter_rng : {None, int, array_like[ints], SeedSequence, BitGenerator,
+                  Generator}
+        The random seed or generator for the fitting algorithm.
     comm : MPI communicator
         The MPI communicator. If None, assumes that MPI is not used.
     cv_verbose : bool
         Verbosity flag for the CV folds.
-    tc_verbose : bool
-        Verbosity flag for the TC solver.
+    fitter_verbose : bool
+        Verbosity flag for the solver.
+    mstep_verbose : bool
+        Only for EM inference. Verbosity flag for the solver during the M-step.
 
     Returns
     -------
     mlls : np.ndarray
         The marginal log-likelihood of the trained model on the held out data.
+        Only for EM option.
+    mses : np.ndarray
+        The mean-squared error on the held-out data, using only tuning and
+        coupling parameters. Only for TC and ITSFA options.
+    bics : np.ndarray
+        The BIC on the training data.
     a : np.ndarray
         The coupling parameters.
+    a_est : np.ndarray
+        The estimated coupling parameters.
     b : np.ndarray
         The tuning parameters.
+    b_est : np.ndarray
+        The estimated tuning parameters.
     B : np.ndarray
         The non-target tuning parameters.
-    Psi_tr : np.ndarray
-        The transformed private variances.
+    B_est : np.ndarray
+        The estimated non-target tuning parameters. Only for EM and ITSFA.
+    Psi : np.ndarray
+        The private variances.
+    Psi_est : np.ndarray
+        The estimated private variances. Only for EM.
+    L : np.ndarray
+        The latent factors.
+    L_est : np.ndarray
+        The estimated latent factors. Only for EM.
     """
     # Handle MPI communicators
     rank = 0
@@ -718,7 +747,7 @@ def cv_solver_full(
             print(f'Rank {rank}, Task {task_idx}')
 
         # Generate triangular model
-        tm = TriangularModel.TriangularModel(
+        tm = TriangularModel(
             model='linear',
             parameter_design='direct_response',
             M=M, N=N, K=K,
@@ -757,7 +786,7 @@ def cv_solver_full(
         # Run the sparse fitter
         if method == 'em':
             if selection == 'oracle':
-                fitter = EMSolver.EMSolver(
+                fitter = EMSolver(
                     X=X_train,
                     Y=Y_train,
                     y=y_train,
@@ -776,7 +805,7 @@ def cv_solver_full(
                         refit=False
                     )
             elif selection == 'sparse':
-                fitter = EMSolver.EMSolver(
+                fitter = EMSolver(
                     X=X_train,
                     Y=Y_train,
                     y=y_train,
@@ -813,19 +842,32 @@ def cv_solver_full(
             if selection == 'sparse':
                 raise NotImplementedError()
             elif selection == 'oracle':
-                fitter = ITSFASolver.ITSFASolver(
+                fitter = ITSFASolver(
                     X=X_train,
                     Y=Y_train,
                     y=y_train,
+                    K=K_cv,
                     B=None,
                     a_mask=tm.a.ravel() != 0,
-                    b_mask=tm.b.ravel() != 0
-                ).fit_itsfa(K=K_cv, max_iter=50)
+                    b_mask=tm.b.ravel() != 0,
+                    max_iter=max_iter,
+                    tol=tol,
+                    fa_max_iter=10000,
+                    fa_tol=1e-4
+                ).fit_itsfa()
+
+            # Store parameter fits
+            a_est[task_idx] = fitter.a.ravel()
+            b_est[task_idx] = fitter.b.ravel()
+            # Score the resulting fit
+            mses[task_idx] = fitter.mse(X=X_test, Y=Y_test, y=y_test)
+            # Calculate BIC
+            bics[task_idx] = fitter.bic()
 
         elif method == 'tc':
             if selection == 'sparse':
                 # Run the sparse fitter
-                fitter = TCSolver.TCSolver(
+                fitter = TCSolver(
                     X=X_train,
                     Y=Y_train,
                     y=y_train,
@@ -840,7 +882,7 @@ def cv_solver_full(
                         verbose=fitter_verbose
                     )
             elif selection == 'oracle':
-                fitter = TCSolver.TCSolver(
+                fitter = TCSolver(
                     X=X_train,
                     Y=Y_train,
                     y=y_train,
@@ -855,6 +897,7 @@ def cv_solver_full(
             # Store parameter fits
             a_est[task_idx] = fitter.a.ravel()
             b_est[task_idx] = fitter.b.ravel()
+            B_est[task_idx] = fitter.B
             # Score the resulting fit
             mses[task_idx] = fitter.mse(X=X_test, Y=Y_test, y=y_test)
             # Calculate BIC
@@ -962,9 +1005,9 @@ def cv_solver_full(
 
     if method == 'em':
         return mlls, bics, a, a_est, b, b_est, B, B_est, Psi, Psi_est, L, L_est
+    elif method == 'itsfa':
+        return mses, bics, a, a_est, b, b_est, B, B_est, Psi, L
     elif method == 'tc':
         return mses, bics, a, a_est, b, b_est, B, Psi, L
-    elif method == 'itsfa':
-        raise NotImplementedError()
     else:
-        return
+        raise ValueError("Incorrect method specified.")
