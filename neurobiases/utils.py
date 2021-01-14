@@ -549,7 +549,8 @@ def process_tc_double_results(results):
 
 
 def check_identifiability_conditions(Psi_nt, L_nt, B, a_mask, b_mask):
-    """Checks the conditions for clamping identifiability.
+    """Checks the conditions under which sufficiently sparse tuning and
+    coupling parameters will remove the identifiability in the triangular model.
 
     Parameters
     ----------

@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from neurobiases import TriangularModel, utils
 from neurobiases.solver_utils import marginal_log_likelihood_linear_tm_wrapper
@@ -160,3 +161,15 @@ def test_identifiability():
             X=X, Y=Y, y=y, tm=tm
         )
         assert_allclose(pre_ll, post_ll)
+
+
+def test_identifiability_warning():
+    """Tests that a warning is received if the model is not identifiable."""
+    # Check that identifiability warning is raised
+    with pytest.warns(RuntimeWarning) as record:
+        TriangularModel(coupling_sparsity=0., tuning_sparsity=0., K=3)
+    assert len(record) == 1
+    # Check that identifiability warning is not raised
+    with pytest.warns(None) as record:
+        TriangularModel(coupling_sparsity=0.5, tuning_sparsity=0.5, K=3)
+    assert len(record) == 0

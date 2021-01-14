@@ -1,6 +1,7 @@
 import neurobiases.utils as utils
 import neurobiases.plot as plot
 import numpy as np
+import warnings
 
 from scipy.stats import truncexpon
 
@@ -107,7 +108,7 @@ class TriangularModel:
         tuning_add_noise=True, tuning_overall_scale=1., tuning_rng=2332,
         K=1, snr=3, noise_structure='clusters', corr_cluster=0.2,
         corr_back=0., corr_max=0.3, corr_min=0.0, L_corr=1,
-        stim_distribution='uniform', stim_kwargs=None
+        stim_distribution='uniform', stim_kwargs=None, warn=True
     ):
         self.model = model
         self.parameter_design = parameter_design
@@ -206,6 +207,16 @@ class TriangularModel:
         self.a, self.b, self.B = self.generate_triangular_model()
         self.B_all = np.concatenate((self.B, self.b), axis=1)
         self.generate_noise_structure()
+        # Check that the instantiated model is identifiable
+        if not self.check_identifiability_conditions():
+            if warn:
+                warnings.warn(
+                    "This model is not identifiable. If you intend to " +
+                    "perform inference on this model, you should adjust the " +
+                    "hyperparameters (e.g., sparsity) or random seed to " +
+                    "guarantee identifiability.",
+                    category=RuntimeWarning
+                )
 
     def generate_triangular_model(self):
         """Generate model parameters in the triangular model.
@@ -635,9 +646,9 @@ class TriangularModel:
             Whether the check passed.
         """
         if a_mask is None:
-            a_mask = self.a_mask.ravel()
+            a_mask = self.get_masks()[0]
         if b_mask is None:
-            b_mask = self.b_mask.ravel()
+            b_mask = self.get_masks()[1]
         return utils.check_identifiability_conditions(
             Psi_nt=self.Psi_nt, L_nt=self.L_nt, B=self.B, a_mask=a_mask, b_mask=b_mask
         )
