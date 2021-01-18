@@ -3,7 +3,7 @@ import torch
 
 from .lbfgs import fmin_lbfgs
 from neurobiases import plot
-from neurobiases import solver_utils as utils
+from neurobiases import em_utils as utils
 from scipy.optimize import minimize
 from sklearn.decomposition import FactorAnalysis
 from sklearn.linear_model import LinearRegression

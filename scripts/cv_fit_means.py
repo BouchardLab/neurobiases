@@ -17,6 +17,7 @@ def main(args):
     D = args.D
     n_datasets = args.n_datasets
     n_models = args.n_models
+    lightweight = args.lightweight
 
     # Model hyperparameters
     n_coupling_locs = args.n_coupling_locs
@@ -281,37 +282,41 @@ def main(args):
 
     # Fit parameters according to TCM (using sparse TC solver)
     elif model_fit == 'tc':
-        mses, bics, a, a_est, b, b_est, B, Psi, L = \
-            cv_solver_full(
-                method='tc',
-                selection=selection,
-                M=M, N=N, K=K, D=D,
-                coupling_distribution=args.coupling_distribution,
-                coupling_sparsities=np.array([args.coupling_sparsity]),
-                coupling_locs=coupling_locs,
-                coupling_scale=args.coupling_scale,
-                coupling_rngs=coupling_rngs,
-                tuning_distribution=args.tuning_distribution,
-                tuning_sparsities=np.array([args.tuning_sparsity]),
-                tuning_locs=tuning_locs,
-                tuning_scale=args.tuning_scale,
-                tuning_rngs=tuning_rngs,
-                corr_clusters=np.array([args.corr_cluster]),
-                corr_back=args.corr_back,
-                dataset_rngs=dataset_rngs,
-                coupling_lambdas=coupling_lambdas,
-                tuning_lambdas=tuning_lambdas,
-                cv=args.cv,
-                solver=args.solver,
-                initialization=args.initialization,
-                max_iter=args.max_iter,
-                tol=args.tol,
-                refit=args.refit,
-                comm=comm,
-                cv_verbose=args.cv_verbose,
-                fitter_verbose=args.fitter_verbose,
-                fitter_rng=fitter_rng
-            )
+        results = cv_solver_full(
+            method='tc',
+            selection=selection,
+            M=M, N=N, K=K, D=D,
+            coupling_distribution=args.coupling_distribution,
+            coupling_sparsities=np.array([args.coupling_sparsity]),
+            coupling_locs=coupling_locs,
+            coupling_scale=args.coupling_scale,
+            coupling_rngs=coupling_rngs,
+            tuning_distribution=args.tuning_distribution,
+            tuning_sparsities=np.array([args.tuning_sparsity]),
+            tuning_locs=tuning_locs,
+            tuning_scale=args.tuning_scale,
+            tuning_rngs=tuning_rngs,
+            corr_clusters=np.array([args.corr_cluster]),
+            corr_back=args.corr_back,
+            dataset_rngs=dataset_rngs,
+            coupling_lambdas=coupling_lambdas,
+            tuning_lambdas=tuning_lambdas,
+            cv=args.cv,
+            solver=args.solver,
+            initialization=args.initialization,
+            max_iter=args.max_iter,
+            tol=args.tol,
+            refit=args.refit,
+            comm=comm,
+            cv_verbose=args.cv_verbose,
+            fitter_verbose=args.fitter_verbose,
+            fitter_rng=fitter_rng,
+            lightweight=lightweight
+        )
+        if lightweight:
+            mses, bics, a, a_est, b, b_est = results
+        else:
+            mses, bics, a, a_est, b, b_est, B, Psi, L = results
         if rank == 0:
             if selection == 'sparse':
                 shape_key = np.array(['tuning_loc',
@@ -344,9 +349,10 @@ def main(args):
             results['a_est'] = np.squeeze(a_est)
             results['b_true'] = np.squeeze(b)
             results['b_est'] = np.squeeze(b_est)
-            results['B_true'] = np.squeeze(B)
-            results['Psi_true'] = np.squeeze(Psi)
-            results['L_true'] = np.squeeze(L, axis=(0, 2, 5))
+            if not lightweight:
+                results['B_true'] = np.squeeze(B)
+                results['Psi_true'] = np.squeeze(Psi)
+                results['L_true'] = np.squeeze(L, axis=(0, 2, 5))
             results['coupling_locs'] = coupling_locs
             results['tuning_locs'] = tuning_locs
             results['coupling_lambdas'] = coupling_lambdas
@@ -437,6 +443,8 @@ if __name__ == '__main__':
     parser.add_argument('--cv_verbose', action='store_true')
     parser.add_argument('--fitter_verbose', action='store_true')
     parser.add_argument('--mstep_verbose', action='store_true')
+    # Other options
+    parser.add_argument('--lightweight', action='store_true')
     args = parser.parse_args()
 
     main(args)
