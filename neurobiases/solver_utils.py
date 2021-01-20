@@ -8,11 +8,11 @@ from sklearn.model_selection import check_cv
 from sklearn.utils.extmath import cartesian
 
 
-def cv_sparse_em_solver(
-    X, Y, y, coupling_lambdas, tuning_lambdas, Ks, cv=5,
-    solver='ow_lbfgs', initialization='fits', max_iter=1000, tol=1e-4, refit=False,
-    random_state=None, comm=None, cv_verbose=False, em_verbose=False,
-    mstep_verbose=False
+def cv_sparse_solver_single(
+    method, X, Y, y, coupling_lambdas, tuning_lambdas, Ks=np.array([1]), cv=5,
+    solver='ow_lbfgs', initialization='fits', max_iter=1000, tol=1e-4,
+    refit=False, fitter_rng=None, comm=None, cv_verbose=False,
+    fitter_verbose=False, mstep_verbose=False
 ):
     """Performs a cross-validated, sparse EM fit on the triangular model.
 
@@ -63,11 +63,11 @@ def cv_sparse_em_solver(
     Psi_tr : np.ndarray
         The transformed private variances.
     """
-    # dimensions
+    # Get dimensions
     M = X.shape[1]
     N = Y.shape[1]
 
-    # handle MPI communicators
+    # Handle MPI communicators
     rank = 0
     size = 1
     if comm is not None:
@@ -75,166 +75,105 @@ def cv_sparse_em_solver(
         rank = comm.rank
         size = comm.size
 
-    # get cv objects
+    # Get CV object
     cv = check_cv(cv=cv)
     n_splits = cv.get_n_splits()
-    # assign tasks
-    hyperparameters = cartesian((coupling_lambdas, tuning_lambdas, Ks))
+    splits = np.arange(n_splits)
+
+    # Assign tasks
+    if method == 'em':
+        hyperparameters = cartesian((coupling_lambdas,
+                                     tuning_lambdas,
+                                     Ks,
+                                     splits))
+    elif method == 'itsfa':
+        hyperparameters = cartesian((Ks, splits))
+    elif method == 'tc':
+        hyperparameters = cartesian((coupling_lambdas, tuning_lambdas, splits))
+    else:
+        raise ValueError('Method is invalid.')
+
     tasks = np.array_split(hyperparameters, size)[rank]
     n_tasks = len(tasks)
-    # create storage
-    mlls = np.zeros((n_tasks, n_splits))
-    bics = np.zeros((n_tasks, n_splits))
-    a = np.zeros((n_tasks, n_splits, N))
-    b = np.zeros((n_tasks, n_splits, M))
-    B = np.zeros((n_tasks, n_splits, M, N))
-    Psi = np.zeros((n_tasks, n_splits, N + 1))
-    L = np.zeros((n_tasks, n_splits, Ks.max(), N + 1))
-    n_iterations = np.zeros((n_tasks, n_splits))
 
-    for split_idx, (train_idx, test_idx) in enumerate(cv.split(X, y)):
-        # get training set
+    # Create storage arrays
+    if method == 'em':
+        mlls = np.zeros(n_tasks)
+        bics = np.zeros(n_tasks)
+        a_est = np.zeros((n_tasks, N))
+        b_est = np.zeros((n_tasks, M))
+        B_est = np.zeros((n_tasks, M, N))
+        Psi_est = np.zeros((n_tasks, N + 1))
+        L_est = np.zeros((n_tasks, Ks.max(), N + 1))
+    elif method == 'itsfa':
+        mses = np.zeros(n_tasks)
+        bics = np.zeros(n_tasks)
+        a_est = np.zeros((n_tasks, N))
+        b_est = np.zeros((n_tasks, M))
+        B_est = np.zeros((n_tasks, M, N))
+    elif method == 'tc':
+        mses = np.zeros(n_tasks)
+        bics = np.zeros(n_tasks)
+        a_est = np.zeros((n_tasks, N))
+        b_est = np.zeros((n_tasks, M))
+
+    # Iterate over tasks for this rank
+    for task_idx, values in enumerate(tasks):
+        if method == 'em':
+            c_coupling, c_tuning, K_cv, split_idx = values
+        elif method == 'itsfa':
+            K_cv, split_idx = values
+        elif method == 'tc':
+            c_coupling, c_tuning, split_idx = values
+
+        if cv_verbose:
+            print(f'Rank {rank}, Task {task_idx}')
+
+        # Pull out the indices for the current fold
+        train_idx, test_idx = list(cv.split(X))[int(split_idx)]
         X_train = X[train_idx]
         Y_train = Y[train_idx]
         y_train = y[train_idx]
-        # get test set
         X_test = X[test_idx]
         Y_test = Y[test_idx]
         y_test = y[test_idx]
 
-        # iterate over hyperparameters
-        for task_idx, (c_coupling, c_tuning, K) in enumerate(tasks):
-            if cv_verbose:
-                print(f'Rank {rank}: fold = {split_idx + 1}',
-                      f'coupling = {c_coupling}, tuning = {c_tuning}, K = {K}')
-            # run the sparse fitter
-            emfit = EMSolver(
-                X=X_train, Y=Y_train, y=y_train,
-                K=int(K),
+        if method == 'em':
+            fitter = EMSolver(
+                X=X_train,
+                Y=Y_train,
+                y=y_train,
+                K=int(K_cv),
                 solver=solver,
                 initialization=initialization,
                 max_iter=max_iter,
                 tol=tol,
                 c_tuning=c_tuning,
                 c_coupling=c_coupling,
-                rng=random_state).fit_em(
-                    verbose=em_verbose,
+                rng=fitter_rng,
+                fa_rng=2332).fit_em(
+                    verbose=fitter_verbose,
                     mstep_verbose=mstep_verbose,
                     refit=refit
                 )
-            # store parameter fits
-            a[task_idx, split_idx] = emfit.a.ravel()
-            b[task_idx, split_idx] = emfit.b.ravel()
-            B[task_idx, split_idx] = emfit.B
-            Psi[task_idx, split_idx] = emfit.Psi_tr_to_Psi()
-            L[task_idx, split_idx, :int(K), :] = emfit.L
-            n_iterations[task_idx, split_idx] = emfit.n_iterations
-            # score the resulting fit
-            mlls[task_idx, split_idx] = emfit.marginal_log_likelihood(
-                X=X_test, Y=Y_test, y=y_test
-            )
-            # calculate BIC
-            bics[task_idx, split_idx] = emfit.bic()
-    if comm is not None:
-        mlls = Gatherv_rows(mlls, comm)
-        bics = Gatherv_rows(bics, comm)
-        a = Gatherv_rows(a, comm)
-        b = Gatherv_rows(b, comm)
-        B = Gatherv_rows(B, comm)
-        Psi = Gatherv_rows(Psi, comm)
-        L = Gatherv_rows(L, comm)
-        n_iterations = Gatherv_rows(n_iterations, comm)
-    return mlls, bics, a, b, B, Psi, L, n_iterations
 
-
-def cv_sparse_tc_solver(
-    X, Y, y, coupling_lambdas, tuning_lambdas, cv=5, solver='ow_lbfgs',
-    initialization='random', refit=False, random_state=None, comm=None,
-    cv_verbose=False, tc_verbose=False
-):
-    """Performs a cross-validated, sparse TC fit on the triangular model.
-
-    This function is parallelized with MPI. It parallelizes coupling and tuning
-    hyperparameters. Fits across cross-validation folds
-    are performed within a core.
-
-    Parameters
-    ----------
-    X : np.ndarray, shape (D, M)
-        Design matrix for tuning features.
-    Y : np.ndarray, shape (D, N)
-        Design matrix for coupling features.
-    y : np.ndarray, shape (D, 1)
-        Neural response vector.
-    coupling_lambdas : np.ndarray
-        The coupling sparsity penalties to apply to the optimization.
-    tuning_lambdas : np.ndarray
-        The tuning sparsity penalties to apply to the optimization.
-    cv : int, or cross-validation object
-        The number of cross-validation folds, if int. Can also be its own
-        cross-validator object.
-    solver : string
-        The sparse solver to use. Defaults to orthant-wise LBFGS.
-    random_state : random state object
-        Used for EM solver.
-    comm : MPI communicator
-        For MPI runs. If None, assumes that MPI is not used.
-    verbose : bool
-        If True, prints out updates during hyperparameter folds.
-
-    Returns
-    -------
-    mses : np.ndarray
-        The marginal log-likelihood of the trained model on the held out data.
-    bics : np.ndarray
-
-    a : np.ndarray
-        The coupling parameters.
-    b : np.ndarray
-        The tuning parameters.
-    """
-    # Extract dimensions
-    M = X.shape[1]
-    N = Y.shape[1]
-
-    # Handle MPI communicators, if they are provided
-    rank = 0
-    size = 1
-    if comm is not None:
-        from mpi_utils.ndarray import Gatherv_rows
-        rank = comm.rank
-        size = comm.size
-
-    # Get cv objects
-    cv = check_cv(cv=cv)
-    n_splits = cv.get_n_splits()
-    # Assign tasks
-    hyperparameters = cartesian((coupling_lambdas, tuning_lambdas))
-    tasks = np.array_split(hyperparameters, size)[rank]
-    n_tasks = len(tasks)
-    # Create storage arrays
-    mses = np.zeros((n_tasks, n_splits))
-    bics = np.zeros((n_tasks, n_splits))
-    a = np.zeros((n_tasks, n_splits, N))
-    b = np.zeros((n_tasks, n_splits, M))
-
-    for split_idx, (train_idx, test_idx) in enumerate(cv.split(X, y)):
-        # get training set
-        X_train = X[train_idx]
-        Y_train = Y[train_idx]
-        y_train = y[train_idx]
-        # get test set
-        X_test = X[test_idx]
-        Y_test = Y[test_idx]
-        y_test = y[test_idx]
-
-        # iterate over hyperparameters
-        for task_idx, (c_coupling, c_tuning) in enumerate(tasks):
-            if cv_verbose:
-                print(f'Rank {rank}: fold = {split_idx + 1}',
-                      f'coupling = {c_coupling}, tuning = {c_tuning}')
-            # run the sparse fitter
-            tcfit = TCSolver(
+            # Store parameter fits
+            a_est[task_idx] = fitter.a.ravel()
+            b_est[task_idx] = fitter.b.ravel()
+            B_est[task_idx] = fitter.B
+            Psi_est[task_idx] = fitter.Psi_tr_to_Psi()
+            L_est[task_idx, :int(K_cv), :] = fitter.L
+            # Score the resulting fit
+            mlls[task_idx] = fitter.marginal_log_likelihood(
+                X=X_test,
+                Y=Y_test,
+                y=y_test)
+            # Calculate BIC
+            bics[task_idx] = fitter.bic()
+        elif method == 'itsfa':
+            raise NotImplementedError()
+        elif method == 'tc':
+            fitter = TCSolver(
                 X=X_train,
                 Y=Y_train,
                 y=y_train,
@@ -242,24 +181,65 @@ def cv_sparse_tc_solver(
                 c_tuning=c_tuning,
                 c_coupling=c_coupling,
                 initialization=initialization,
-                random_state=random_state).fit_lasso(
+                max_iter=max_iter,
+                tol=tol,
+                rng=fitter_rng).fit_lasso(
                     refit=refit,
-                    verbose=tc_verbose)
-            # store parameter fits
-            a[task_idx, split_idx] = tcfit.a
-            b[task_idx, split_idx] = tcfit.b
-            # score the resulting fit
-            mses[task_idx, split_idx] = tcfit.mse(
-                X=X_test, Y=Y_test, y=y_test
-            )
-            # calculate BIC
-            bics[task_idx, split_idx] = tcfit.bic()
+                    verbose=fitter_verbose
+                )
+            # Store parameter fits
+            a_est[task_idx] = fitter.a.ravel()
+            b_est[task_idx] = fitter.b.ravel()
+            # Score the resulting fit
+            mses[task_idx] = fitter.mse(X=X_test, Y=Y_test, y=y_test)
+            # Calculate BIC
+            bics[task_idx] = fitter.bic()
+
     if comm is not None:
-        mses = Gatherv_rows(mses, comm)
-        bics = Gatherv_rows(bics, comm)
-        a = Gatherv_rows(a, comm)
-        b = Gatherv_rows(b, comm)
-    return mses, bics, a, b
+        # Gather tasks across all storage arrays
+        if method == 'em':
+            mlls = Gatherv_rows(mlls, comm)
+            bics = Gatherv_rows(bics, comm)
+            a_est = Gatherv_rows(a_est, comm)
+            b_est = Gatherv_rows(b_est, comm)
+            B_est = Gatherv_rows(B_est, comm)
+            Psi_est = Gatherv_rows(Psi_est, comm)
+            L_est = Gatherv_rows(L_est, comm)
+        elif method == 'itsfa':
+            raise NotImplementedError()
+        elif method == 'tc':
+            mses = Gatherv_rows(mses, comm)
+            bics = Gatherv_rows(bics, comm)
+            a_est = Gatherv_rows(a_est, comm)
+            b_est = Gatherv_rows(b_est, comm)
+
+        if rank == 0:
+            if method == 'em':
+                reshape = [coupling_lambdas.size,
+                           tuning_lambdas.size,
+                           Ks.size,
+                           splits.size]
+                mlls.shape = reshape
+                B_est.shape = reshape + [M, N]
+                Psi_est.shape = reshape + [-1]
+                L_est.shape = reshape + [Ks.max(), N + 1]
+            elif method == 'itsfa':
+                raise NotImplementedError()
+            elif method == 'tc':
+                reshape = [coupling_lambdas.size,
+                           tuning_lambdas.size,
+                           splits.size]
+                mses.shape = reshape
+            a_est.shape = reshape + [-1]
+            b_est.shape = reshape + [-1]
+            bics.shape = reshape
+
+    if method == 'em':
+        return mlls, bics, a_est, b_est, B_est, Psi_est, L_est
+    elif method == 'itsfa':
+        return mses, bics, a_est, b_est, B_est
+    elif method == 'tc':
+        return mses, bics, a_est, b_est
 
 
 def cv_solver_full(
