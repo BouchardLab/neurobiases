@@ -191,6 +191,7 @@ def main(args):
             results.attrs['tuning_rng'] = args.tuning_rng
             results.attrs['dataset_rng'] = args.dataset_rng
             results.attrs['fitter_rng'] = fitter_rng
+            results.close()
 
     elif model_fit == 'itsfa':
         mses, bics, a, a_est, b, b_est, B, B_est, Psi, L = \

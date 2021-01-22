@@ -4,6 +4,7 @@ import numpy as np
 import time
 
 from mpi4py import MPI
+from mpi_utils.ndarray import Bcast_from_root
 from neurobiases import TriangularModel
 from neurobiases.solver_utils import cv_sparse_solver_single
 
@@ -15,8 +16,6 @@ def main(args):
     M = args.M
     K = args.K
     D = args.D
-    model_idx = args.model_idx
-    dataset_idx = args.dataset_idx
 
     # Model hyperparameters
     coupling_locs = np.linspace(args.coupling_loc_min,
@@ -54,9 +53,13 @@ def main(args):
     rank = comm.rank
     if rank == 0:
         t0 = time.time()
-        print('--------------------------------------------------------------')
-        print(f'{size} processes running, this is rank {rank}.')
-        print('--------------------------------------------------------------')
+        n_total_tasks = args.n_coupling_lambdas * args.n_tuning_lambdas * args.cv
+        print('---------------------------------------------------------------')
+        print('Performing a single CV coarse-fine sweep.')
+        print(f'Model: {N} coupling, {M} tuning, {K} latent, {D} samples')
+        print(f'Processes running: {size}')
+        print(f'Total number of tasks: {n_total_tasks}')
+        print('---------------------------------------------------------------')
 
     # Generate triangular model
     tm = TriangularModel(
@@ -80,7 +83,8 @@ def main(args):
     # Generate data using seed
     X, Y, y = tm.generate_samples(n_samples=D, rng=int(dataset_rng))
 
-    results = \
+    # Run coarse sweep CV
+    coarse_sweep_results = \
         cv_sparse_solver_single(
             method=model_fit,
             X=X,
@@ -101,15 +105,120 @@ def main(args):
             mstep_verbose=args.mstep_verbose,
             fitter_rng=fitter_rng
         )
-
+    if rank == 0:
+        # Identify best hyperparameter set according to BIC
+        bics = coarse_sweep_results[1]
+        median_bics = np.median(bics, axis=-1)
+        best_hyps = np.unravel_index(np.argmin(median_bics), median_bics.shape)
+        best_c_coupling = best_hyps[0]
+        best_c_tuning = best_hyps[1]
+        if model_fit == 'em':
+            Ks = np.array([best_hyps[2]])
+        # Create new hyperparameter set
+        coupling_lambda_lower = args.fine_sweep_frac * best_c_coupling
+        coupling_lambda_upper = (1. / args.fine_sweep_frac) * best_c_coupling
+        coupling_lambdas = np.linspace(coupling_lambda_lower,
+                                       coupling_lambda_upper,
+                                       num=n_coupling_lambdas)
+        tuning_lambda_lower = args.fine_sweep_frac * best_c_tuning
+        tuning_lambda_upper = (1. / args.fine_sweep_frac) * best_c_tuning
+        tuning_lambdas = np.linspace(tuning_lambda_lower,
+                                     tuning_lambda_upper,
+                                     num=n_tuning_lambdas)
+    # Broadcast new lambdas out
+    coupling_lambdas = Bcast_from_root(coupling_lambdas, comm)
+    tuning_lambdas = Bcast_from_root(tuning_lambdas, comm)
     if model_fit == 'em':
-        mlls, bics, a, a_est, b, b_est, B, B_est, Psi, Psi_est, L, L_est = \
-            results
+        Ks = Bcast_from_root(Ks, comm)
+    # Verbosity update
+    if rank == 0:
+        t1 = time.time()
+        print(f'Coarse sweep complete. Time elapsed: {t1 - t0} seconds.')
+        print('Beginning fine sweep.')
+    # Run broad sweep CV
+    fine_sweep_results = \
+        cv_sparse_solver_single(
+            method=model_fit,
+            X=X,
+            Y=Y,
+            y=y,
+            coupling_lambdas=coupling_lambdas,
+            tuning_lambdas=tuning_lambdas,
+            Ks=Ks,
+            cv=args.cv,
+            solver=args.solver,
+            initialization=args.initialization,
+            max_iter=args.max_iter,
+            tol=args.tol,
+            refit=args.refit,
+            comm=comm,
+            cv_verbose=args.cv_verbose,
+            fitter_verbose=args.fitter_verbose,
+            mstep_verbose=args.mstep_verbose,
+            fitter_rng=fitter_rng
+        )
+    if model_fit == 'em':
+        mlls, bics, a_est, b_est, B_est, Psi_est, L_est = fine_sweep_results
     elif model_fit == 'tc':
-        mses, bics, a, a_est, b, b_est, B, Psi, L = \
-            results
+        mses, bics, a_est, b_est = fine_sweep_results
 
-    # TODO: second stage CV fit
+    if rank == 0:
+        # Get best overall fit
+        median_bics = np.median(bics, axis=-1)
+        best_hyps = np.unravel_index(np.argmin(median_bics), median_bics.shape)
+        a_est_best = a_est[best_hyps]
+        b_est_best = b_est[best_hyps]
+        if model_fit == 'em':
+            B_est_best = B_est[best_hyps]
+            Psi_est_best = Psi_est[best_hyps]
+            L_est_best = L_est[best_hyps]
+
+        # Save results
+        with h5py.File(save_path, 'w') as results:
+            if model_fit == 'em':
+                results['mlls'] = np.squeeze(mlls)
+            else:
+                results['mses'] = np.squeeze(mses)
+            results['bics'] = np.squeeze(bics)
+            # True parameters
+            results['a_true'] = tm.a.ravel()
+            results['b_true'] = tm.b.ravel()
+            results['B_true'] = tm.B
+            results['Psi_true'] = tm.Psi
+            results['L_true'] = tm.L
+            # Estimated parameters
+            results['a_est'] = a_est_best
+            results['b_est'] = b_est_best
+            if model_fit == 'em':
+                results['B_est'] = B_est_best
+                results['Psi_est'] = Psi_est_best
+                results['L_est'] = L_est_best
+            # Model hyperparameters
+            results.attrs['model_fit'] = args.model_fit
+            results.attrs['N'] = N
+            results.attrs['M'] = M
+            results.attrs['K'] = K
+            results.attrs['D'] = D
+            results.attrs['n_splits'] = args.cv
+            results.attrs['coupling_distribution'] = args.coupling_distribution
+            results.attrs['coupling_sparsity'] = args.coupling_sparsity
+            results.attrs['coupling_scale'] = args.coupling_scale
+            results.attrs['tuning_distribution'] = args.tuning_distribution
+            results.attrs['tuning_sparsity'] = args.tuning_sparsity
+            results.attrs['tuning_scale'] = args.tuning_scale
+            results.attrs['corr_cluster'] = args.corr_cluster
+            results.attrs['corr_back'] = args.corr_back
+            results.attrs['solver'] = args.solver
+            results.attrs['initialization'] = args.initialization
+            results.attrs['max_iter'] = args.max_iter
+            results.attrs['tol'] = args.tol
+            results.attrs['coupling_rng'] = args.coupling_rng
+            results.attrs['tuning_rng'] = args.tuning_rng
+            results.attrs['dataset_rng'] = args.dataset_rng
+            results.attrs['fitter_rng'] = fitter_rng
+
+        t2 = time.time()
+        print(f'Job complete. Time elapsed: {t2 - t0} seconds.')
 
 
 if __name__ == '__main__':
@@ -121,8 +230,6 @@ if __name__ == '__main__':
     parser.add_argument('--M', type=int, default=10)
     parser.add_argument('--K', type=int, default=1)
     parser.add_argument('--D', type=int, default=1000)
-    parser.add_argument('--model_idx', type=int, default=0)
-    parser.add_argument('--dataset_idx', type=int, default=0)
     # Variable model hyperparameters
     parser.add_argument('--n_coupling_locs', type=int, default=30)
     parser.add_argument('--coupling_loc_min', type=float, default=-3)
@@ -139,6 +246,7 @@ if __name__ == '__main__':
     parser.add_argument('--n_tuning_lambdas', type=int, default=30)
     parser.add_argument('--tuning_lambda_lower', type=float, default=-5)
     parser.add_argument('--tuning_lambda_upper', type=float, default=-2)
+    parser.add_argument('--fine_sweep_frac', type=float, default=0.1)
     parser.add_argument('--max_K', type=int, default=1)
     parser.add_argument('--cv', type=int, default=3)
     # Model parameters
