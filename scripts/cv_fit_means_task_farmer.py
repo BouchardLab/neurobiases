@@ -110,8 +110,8 @@ def main(args):
         bics = coarse_sweep_results[1]
         median_bics = np.median(bics, axis=-1)
         best_hyps = np.unravel_index(np.argmin(median_bics), median_bics.shape)
-        best_c_coupling = best_hyps[0]
-        best_c_tuning = best_hyps[1]
+        best_c_coupling = coupling_lambdas[best_hyps[0]]
+        best_c_tuning = tuning_lambdas[best_hyps[1]]
         if model_fit == 'em':
             Ks = np.array([best_hyps[2]])
         # Create new hyperparameter set
@@ -134,6 +134,7 @@ def main(args):
     if rank == 0:
         t1 = time.time()
         print(f'Coarse sweep complete. Time elapsed: {t1 - t0} seconds.')
+        print(f'Centering on {best_c_coupling} (coupling) and {best_c_tuning} (tuning).')
         print('Beginning fine sweep.')
     # Run broad sweep CV
     fine_sweep_results = \
@@ -166,6 +167,7 @@ def main(args):
         # Get best overall fit
         median_bics = np.median(bics, axis=-1)
         best_hyps = np.unravel_index(np.argmin(median_bics), median_bics.shape)
+        print(best_hyps)
         a_est_best = a_est[best_hyps]
         b_est_best = b_est[best_hyps]
         if model_fit == 'em':
@@ -193,6 +195,11 @@ def main(args):
                 results['B_est'] = B_est_best
                 results['Psi_est'] = Psi_est_best
                 results['L_est'] = L_est_best
+            # CV details
+            results['coupling_lambdas'] = coupling_lambdas
+            results['tuning_lambdas'] = tuning_lambdas
+            results.attrs['best_coupling_lambda'] = coupling_lambdas[best_hyps[0]]
+            results.attrs['best_tuning_lambda'] = tuning_lambdas[best_hyps[1]]
             # Model hyperparameters
             results.attrs['model_fit'] = args.model_fit
             results.attrs['N'] = N
@@ -202,9 +209,11 @@ def main(args):
             results.attrs['n_splits'] = args.cv
             results.attrs['coupling_distribution'] = args.coupling_distribution
             results.attrs['coupling_sparsity'] = args.coupling_sparsity
+            results.attrs['coupling_loc'] = coupling_loc
             results.attrs['coupling_scale'] = args.coupling_scale
             results.attrs['tuning_distribution'] = args.tuning_distribution
             results.attrs['tuning_sparsity'] = args.tuning_sparsity
+            results.attrs['tuning_loc'] = tuning_loc
             results.attrs['tuning_scale'] = args.tuning_scale
             results.attrs['corr_cluster'] = args.corr_cluster
             results.attrs['corr_back'] = args.corr_back
