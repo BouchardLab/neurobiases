@@ -178,10 +178,10 @@ def main(args):
         # Save results
         with h5py.File(save_path, 'w') as results:
             if model_fit == 'em':
-                results['mlls'] = np.squeeze(mlls)
+                results['mlls'] = np.squeeze(mlls[best_hyps])
             else:
-                results['mses'] = np.squeeze(mses)
-            results['bics'] = np.squeeze(bics)
+                results['mses'] = np.squeeze(mses[best_hyps])
+            results['bics'] = np.squeeze(bics[best_hyps])
             # True parameters
             results['a_true'] = tm.a.ravel()
             results['b_true'] = tm.b.ravel()
