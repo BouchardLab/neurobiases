@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 
-cd $SCRATCH/taskfarmer
-module load python
-shifter --entrypoint \
-python -u /global/homes/s/sachdeva/neurobiases/scripts/cv_fit_means_task_farmer.py \
+cd $HOME/taskfarmer
+shifter python -u $HOME/neurobiases/scripts/cv_fit_means_task_farmer.py \
 --save_path=$1 \
 --model_fit=$2 \
 --N=$3 \
