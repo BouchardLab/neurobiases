@@ -101,11 +101,11 @@ class EMSolver():
         elif initialization == 'random':
             # Coupling parameters
             coupling_mask = self.a_mask.ravel().astype('bool')
-            self.a = self.rng.normal(loc=0., scale=3., size=(self.N, 1))
+            self.a = self.rng.normal(loc=0., scale=1., size=(self.N, 1))
             self.a[np.invert(coupling_mask), 0] = 0.
             # Tuning parameters
             tuning_mask = self.b_mask.ravel().astype('bool')
-            self.b = self.rng.normal(loc=0., scale=3., size=(self.M, 1))
+            self.b = self.rng.normal(loc=0., scale=1., size=(self.M, 1))
             self.b[np.invert(tuning_mask), 0] = 0.
             # Non-target tuning parameters
             self.B = np.zeros((self.M, self.N))
@@ -114,7 +114,7 @@ class EMSolver():
                 self.B[:, neuron][current_mask] = \
                     self.rng.normal(loc=0., scale=3., size=(current_mask.sum()))
             # Noise parameters
-            self.Psi_tr = self.rng.normal(loc=0., scale=3., size=(self.N + 1))
+            self.Psi_tr = self.rng.normal(loc=0., scale=1., size=(self.N + 1))
             self.L = self.rng.normal(loc=0., scale=0.1, size=(self.K, self.N + 1))
 
         elif initialization == 'fits':
