@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-cd $HOME/taskfarmer
+cd $HOME/scripts/neurobiases/exp11
 shifter python -u $HOME/neurobiases/scripts/cv_fit_means_task_farmer.py \
 --save_path=$1 \
 --model_fit=$2 \
@@ -22,22 +22,22 @@ shifter python -u $HOME/neurobiases/scripts/cv_fit_means_task_farmer.py \
 --n_tuning_lambdas=${18} \
 --tuning_lambda_lower=${19} \
 --tuning_lambda_upper=${20} \
---fine_sweep_frac=0.05 \
+--fine_sweep_frac=${21} \
 --max_K=1 \
 --cv=5 \
 --coupling_distribution=gaussian \
 --coupling_sparsity=0.5 \
---coupling_scale=1. \
+--coupling_scale=0.5 \
 --tuning_distribution=gaussian \
 --tuning_sparsity=0.5 \
---tuning_scale=1. \
+--tuning_scale=0.5 \
 --corr_cluster=0.25 \
---solver=cd \
---initialization=fits \
---max_iter=5000 \
---tol=1e-4 \
+--solver=${22} \
+--initialization=${23} \
+--max_iter=${24} \
+--tol=${25} \
 --refit \
---coupling_rng=1252021 \
---tuning_rng=25012021 \
---dataset_rng=2452954 \
---fitter_rng=495821
+--coupling_rng=${26} \
+--tuning_rng=${27} \
+--dataset_rng=${28} \
+--fitter_rng=${29}
