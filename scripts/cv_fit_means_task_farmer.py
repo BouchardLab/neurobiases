@@ -167,7 +167,6 @@ def main(args):
         # Get best overall fit
         median_bics = np.median(bics, axis=-1)
         best_hyps = np.unravel_index(np.argmin(median_bics), median_bics.shape)
-        print(best_hyps)
         a_est_best = a_est[best_hyps]
         b_est_best = b_est[best_hyps]
         if model_fit == 'em':
