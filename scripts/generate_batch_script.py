@@ -71,7 +71,7 @@ def main(args):
             f"#SBATCH --error=$HOME/error/neurobiases/{tag}.txt\n" +
             "#SBATCH -t 00:30:00\n" +
             "#SBATCH --image=docker:pssachdeva/neuro:latest\n\n" +
-            "export OMP_NUM_THREADS=1\n\n"
+            "export OMP_NUM_THREADS={n_cores}\n\n"
         )
 
         for ii in range(n_coupling_locs):
@@ -79,7 +79,7 @@ def main(args):
                 for kk, (coupling_rng, tuning_rng) in enumerate(zip(coupling_rngs, tuning_rngs)):
                     for ll, dataset_rng in enumerate(dataset_rngs):
                         command = \
-                            f"srun -N {n_nodes} -n {n_tasks} -c {n_cores} $OMP_NUM_THREADS " \
+                            f"srun -N {n_nodes} -n {n_tasks} -c $OMP_NUM_THREADS " \
                             + f"shifter python -u {script_path} " \
                             + f"--save_path={save_folder}/{model_fit}_{ii}_{jj}_{kk}_{ll}.h5 " \
                             + "--model_fit=em " \
