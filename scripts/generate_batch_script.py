@@ -69,9 +69,11 @@ def main(args):
             "#SBATCH -J nb\n" +
             f"#SBATCH --output=$HOME/out/neurobiases/{tag}.txt\n" +
             f"#SBATCH --error=$HOME/error/neurobiases/{tag}.txt\n" +
+            "#SBATCH --mail-user=pratik.sachdeva@berkeley.edu\n" +
+            "#SBATCH --mail-type=ALL" +
             "#SBATCH -t 00:30:00\n" +
             "#SBATCH --image=docker:pssachdeva/neuro:latest\n\n" +
-            "export OMP_NUM_THREADS={n_cores}\n\n"
+            f"export OMP_NUM_THREADS={n_cores}\n\n"
         )
 
         for ii in range(n_coupling_locs):
