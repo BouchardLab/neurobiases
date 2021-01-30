@@ -67,8 +67,8 @@ def main(args):
             "#SBATCH -C haswell\n" +
             "#SBATCH -q debug\n" +
             "#SBATCH -J nb\n" +
-            f"#SBATCH --output=$HOME/out/neurobiases/{tag}.txt\n" +
-            f"#SBATCH --error=$HOME/error/neurobiases/{tag}.txt\n" +
+            f"#SBATCH --output=/global/homes/s/sachdeva/out/neurobiases/{tag}.txt\n" +
+            f"#SBATCH --error=/global/homes/s/sachdeva/error/neurobiases/{tag}.txt\n" +
             "#SBATCH --mail-user=pratik.sachdeva@berkeley.edu\n" +
             "#SBATCH --mail-type=ALL\n" +
             "#SBATCH -t 00:30:00\n" +
@@ -84,7 +84,7 @@ def main(args):
                             f"srun -N {n_nodes} -n {n_tasks} -c $OMP_NUM_THREADS " \
                             + f"shifter python -u {script_path} " \
                             + f"--save_path={save_folder}/{model_fit}_{ii}_{jj}_{kk}_{ll}.h5 " \
-                            + "--model_fit=em " \
+                            + f"--model_fit={model_fit} " \
                             + f"--N={N} --M={M} --K={K} --D={D} " \
                             + f"--n_coupling_locs={n_coupling_locs} " \
                             + f"--coupling_loc_min={coupling_loc_min} " \
