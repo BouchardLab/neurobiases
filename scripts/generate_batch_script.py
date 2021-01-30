@@ -3,6 +3,7 @@ import numpy as np
 
 
 def main(args):
+    script_path = args.script_path
     batch_path = args.batch_path
     save_folder = args.save_folder
     tag = args.tag
@@ -78,8 +79,8 @@ def main(args):
                 for kk, (coupling_rng, tuning_rng) in enumerate(zip(coupling_rngs, tuning_rngs)):
                     for ll, dataset_rng in enumerate(dataset_rngs):
                         command = \
-                            f"srun -n {n_tasks} -c {n_cores} $OMP_NUM_THREADS " \
-                            + "shifter python -u $HOME/neurobiases/scripts/cv_double_fit_means.py " \
+                            f"srun -N {n_nodes} -n {n_tasks} -c {n_cores} $OMP_NUM_THREADS " \
+                            + f"shifter python -u {script_path} " \
                             + f"--save_path={save_folder}/{model_fit}_{ii}_{jj}_{kk}_{ll}.h5 " \
                             + "--model_fit=em " \
                             + f"--N={N} --M={M} --K={K} --D={D} " \
@@ -123,6 +124,7 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run CV solver on triangular model.')
+    parser.add_argument('--script_path', type=str)
     parser.add_argument('--batch_path', type=str)
     parser.add_argument('--save_folder', type=str)
     # NERSC options
