@@ -7,9 +7,12 @@ def main(args):
     batch_path = args.batch_path
     save_folder = args.save_folder
     tag = args.tag
+    n_total_nodes = args.n_total_nodes
     n_nodes = args.n_nodes
     n_tasks = args.n_tasks
     n_cores = args.n_cores
+    qos = args.qos
+    time = args.time
     model_fit = args.model_fit
     N = args.N
     M = args.M
@@ -63,15 +66,15 @@ def main(args):
     with open(batch_path, 'w') as tasks:
         tasks.write(
             "#!/bin/bash\n" +
-            f"#SBATCH -N {n_nodes}\n" +
+            f"#SBATCH -N {n_total_nodes}\n" +
             "#SBATCH -C haswell\n" +
-            "#SBATCH -q debug\n" +
+            f"#SBATCH -q {qos}\n" +
             "#SBATCH -J nb\n" +
             f"#SBATCH --output=/global/homes/s/sachdeva/out/neurobiases/{tag}.txt\n" +
             f"#SBATCH --error=/global/homes/s/sachdeva/error/neurobiases/{tag}.txt\n" +
             "#SBATCH --mail-user=pratik.sachdeva@berkeley.edu\n" +
             "#SBATCH --mail-type=ALL\n" +
-            "#SBATCH -t 00:30:00\n" +
+            f"#SBATCH -t {time}\n" +
             "#SBATCH --image=docker:pssachdeva/neuro:latest\n\n" +
             f"export OMP_NUM_THREADS={n_cores}\n\n"
         )
@@ -131,9 +134,12 @@ if __name__ == '__main__':
     parser.add_argument('--save_folder', type=str)
     # NERSC options
     parser.add_argument('--tag', type=str)
+    parser.add_argument('--n_total_nodes', type=int, default=5)
     parser.add_argument('--n_nodes', type=int, default=1)
     parser.add_argument('--n_tasks', type=int, default=32)
     parser.add_argument('--n_cores', type=int, default=1)
+    parser.add_argument('--qos', type=str, default='debug')
+    parser.add_argument('--time', type=str, default='00:30:00')
     # Fixed model hyperparameters
     parser.add_argument('--model_fit', default='em')
     parser.add_argument('--N', type=int, default=10)
