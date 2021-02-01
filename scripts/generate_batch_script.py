@@ -78,11 +78,12 @@ def main(args):
             "#SBATCH --image=docker:pssachdeva/neuro:latest\n\n" +
             f"export OMP_NUM_THREADS={n_cores}\n\n"
         )
-
+        counter = 0
         for ii in range(n_coupling_locs):
             for jj in range(n_tuning_locs):
                 for kk, (coupling_rng, tuning_rng) in enumerate(zip(coupling_rngs, tuning_rngs)):
                     for ll, dataset_rng in enumerate(dataset_rngs):
+                        counter += 1
                         command = \
                             f"srun -N {n_nodes} -n {n_tasks} -c $OMP_NUM_THREADS " \
                             + f"shifter python -u {script_path} " \
@@ -123,8 +124,13 @@ def main(args):
                             + f"--tuning_rng={tuning_rng} " \
                             + f"--dataset_rng={dataset_rng} " \
                             + f"--fitter_rng={fitter_rng} &\n"
+                        if args.job_skip == counter:
+                            command += "wait \n"
+                            counter = 0
                         tasks.write(command)
-        tasks.write("wait")
+        n_total_jobs = n_coupling_locs * n_tuning_locs * n_models * n_datasets
+        if args.job_skip == -1 or n_total_jobs % args.job_skip != 0:
+            tasks.write("wait")
 
 
 if __name__ == '__main__':
@@ -140,6 +146,7 @@ if __name__ == '__main__':
     parser.add_argument('--n_cores', type=int, default=1)
     parser.add_argument('--qos', type=str, default='debug')
     parser.add_argument('--time', type=str, default='00:30:00')
+    parser.add_argument('--job_skip', type=int, default=-1)
     # Fixed model hyperparameters
     parser.add_argument('--model_fit', default='em')
     parser.add_argument('--N', type=int, default=10)

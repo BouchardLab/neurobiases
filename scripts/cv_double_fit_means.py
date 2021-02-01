@@ -54,12 +54,6 @@ def main(args):
     if rank == 0:
         t0 = time.time()
         n_total_tasks = args.n_coupling_lambdas * args.n_tuning_lambdas * args.cv
-        print('---------------------------------------------------------------')
-        print('Performing a single CV coarse-fine sweep.')
-        print(f'Model: {N} coupling, {M} tuning, {K} latent, {D} samples')
-        print(f'Processes running: {size}')
-        print(f'Total number of tasks: {n_total_tasks}')
-        print('---------------------------------------------------------------')
 
     # Generate triangular model
     tm = TriangularModel(
@@ -133,9 +127,7 @@ def main(args):
     # Verbosity update
     if rank == 0:
         t1 = time.time()
-        print(f'Coarse sweep complete. Time elapsed: {t1 - t0} seconds.')
-        print(f'Centering on {best_c_coupling} (coupling) and {best_c_tuning} (tuning).')
-        print('Beginning fine sweep.')
+
     # Run broad sweep CV
     fine_sweep_results = \
         cv_sparse_solver_single(
@@ -226,7 +218,17 @@ def main(args):
             results.attrs['fitter_rng'] = fitter_rng
 
         t2 = time.time()
-        print(f'Job complete. Time elapsed: {t2 - t0} seconds.')
+        print(
+            "---------------------------------------------------------------" +
+            "Job complete: Performed a single CV coarse-fine sweep." +
+            f"Model: {N} coupling, {M} tuning, {K} latent, {D} samples" +
+            f"Number of processes: {size}" +
+            f"Total number of tasks: {n_total_tasks}" +
+            f"Fine sweep centered on {best_c_coupling} (coupling) and {best_c_tuning} (tuning)." +
+            f"Coarse sweep time: {t1 - t0} seconds." +
+            f"Total time elapsed: {t2 - t0} seconds." +
+            "---------------------------------------------------------------"
+        )
 
 
 if __name__ == '__main__':
