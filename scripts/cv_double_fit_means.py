@@ -2,14 +2,18 @@ import argparse
 import h5py
 import numpy as np
 import time
+import warnings
 
 from mpi4py import MPI
 from mpi_utils.ndarray import Bcast_from_root
 from neurobiases import TriangularModel
 from neurobiases.solver_utils import cv_sparse_solver_single
+from sklearn.exceptions import ConvergenceWarning
 
 
 def main(args):
+    if args.no_warn:
+        warnings.filterwarnings('ignore', category=ConvergenceWarning)
     save_path = args.save_path
     model_fit = args.model_fit
     N = args.N
@@ -283,6 +287,7 @@ if __name__ == '__main__':
     parser.add_argument('--cv_verbose', action='store_true')
     parser.add_argument('--fitter_verbose', action='store_true')
     parser.add_argument('--mstep_verbose', action='store_true')
+    parser.add_argument('--no_warn', action='store_true')
     args = parser.parse_args()
 
     main(args)
