@@ -223,14 +223,14 @@ def main(args):
 
         t2 = time.time()
         print(
-            "---------------------------------------------------------------" +
-            "Job complete: Performed a single CV coarse-fine sweep." +
-            f"Model: {N} coupling, {M} tuning, {K} latent, {D} samples" +
-            f"Number of processes: {size}" +
-            f"Total number of tasks: {n_total_tasks}" +
-            f"Fine sweep centered on {best_c_coupling} (coupling) and {best_c_tuning} (tuning)." +
-            f"Coarse sweep time: {t1 - t0} seconds." +
-            f"Total time elapsed: {t2 - t0} seconds." +
+            "---------------------------------------------------------------\n" +
+            "Job complete: Performed a single CV coarse-fine sweep.\n" +
+            f"Model: {N} coupling, {M} tuning, {K} latent, {D} samples\n" +
+            f"Number of processes: {size}\n" +
+            f"Total number of tasks: {n_total_tasks}\n" +
+            f"Fine sweep centered on {best_c_coupling} (coupling) and {best_c_tuning} (tuning).\n" +
+            f"Coarse sweep time: {t1 - t0} seconds.\n" +
+            f"Total time elapsed: {t2 - t0} seconds.\n" +
             "---------------------------------------------------------------"
         )
 
