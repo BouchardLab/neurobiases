@@ -123,7 +123,11 @@ def main(args):
                             + f"--coupling_rng={coupling_rng} " \
                             + f"--tuning_rng={tuning_rng} " \
                             + f"--dataset_rng={dataset_rng} " \
-                            + f"--fitter_rng={fitter_rng} &\n"
+                            + f"--fitter_rng={fitter_rng}"
+                        if args.no_warn:
+                            command += " --no_warn &\n"
+                        else:
+                            command += "&\n"
                         if args.job_skip == counter:
                             command += "wait \n"
                             counter = 0
@@ -192,6 +196,7 @@ if __name__ == '__main__':
     parser.add_argument('--tuning_rng', type=int, default=1)
     parser.add_argument('--dataset_rng', type=int, default=1)
     parser.add_argument('--fitter_rng', type=int, default=-1)
+    parser.add_argument('--no_warn', action='store_true')
     args = parser.parse_args()
 
     main(args)
