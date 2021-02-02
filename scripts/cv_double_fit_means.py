@@ -254,11 +254,11 @@ if __name__ == '__main__':
     parser.add_argument('--tuning_loc_max', type=float, default=3)
     parser.add_argument('--tuning_loc_idx', type=int, default=0)
     # CV fitting hyperparameters
-    parser.add_argument('--n_coupling_lambdas', type=int, default=30)
-    parser.add_argument('--coupling_lambda_lower', type=float, default=-5)
+    parser.add_argument('--n_coupling_lambdas', type=int, default=25)
+    parser.add_argument('--coupling_lambda_lower', type=float, default=-7)
     parser.add_argument('--coupling_lambda_upper', type=float, default=-2)
-    parser.add_argument('--n_tuning_lambdas', type=int, default=30)
-    parser.add_argument('--tuning_lambda_lower', type=float, default=-5)
+    parser.add_argument('--n_tuning_lambdas', type=int, default=25)
+    parser.add_argument('--tuning_lambda_lower', type=float, default=-7)
     parser.add_argument('--tuning_lambda_upper', type=float, default=-2)
     parser.add_argument('--fine_sweep_frac', type=float, default=0.1)
     parser.add_argument('--max_K', type=int, default=1)
@@ -266,10 +266,10 @@ if __name__ == '__main__':
     # Model parameters
     parser.add_argument('--coupling_distribution', default='gaussian')
     parser.add_argument('--coupling_sparsity', type=float, default=0.5)
-    parser.add_argument('--coupling_scale', type=float, default=1.)
+    parser.add_argument('--coupling_scale', type=float, default=0.25)
     parser.add_argument('--tuning_distribution', default='gaussian')
     parser.add_argument('--tuning_sparsity', type=float, default=0.5)
-    parser.add_argument('--tuning_scale', type=float, default=1.)
+    parser.add_argument('--tuning_scale', type=float, default=0.25)
     parser.add_argument('--corr_cluster', type=float, default=0.25)
     parser.add_argument('--corr_back', type=float, default=0.10)
     # Fitter arguments

@@ -20,6 +20,9 @@ def main(args):
     D = args.D
     n_models = args.n_models
     n_datasets = args.n_datasets
+    # Other options
+    no_warn = args.no_warn
+    lightweight = args.lightweight
 
     # Model hyperparameters
     n_coupling_locs = args.n_coupling_locs
@@ -97,24 +100,27 @@ def main(args):
                             + f"--n_tuning_locs={n_tuning_locs} " \
                             + f"--tuning_loc_min={tuning_loc_min} " \
                             + f"--tuning_loc_max={tuning_loc_max} " \
-                            + f"--tuning_loc_idx={jj} " \
-                            + f"--n_coupling_lambdas={args.n_coupling_lambdas} " \
-                            + f"--coupling_lambda_lower={args.coupling_lambda_lower} " \
-                            + f"--coupling_lambda_upper={args.coupling_lambda_upper} " \
-                            + f"--n_tuning_lambdas={args.n_tuning_lambdas} " \
-                            + f"--tuning_lambda_lower={args.tuning_lambda_lower} " \
-                            + f"--tuning_lambda_upper={args.tuning_lambda_upper} " \
-                            + f"--fine_sweep_frac={args.fine_sweep_frac} " \
-                            + f"--max_K={args.max_K} " \
-                            + f"--cv={args.cv} " \
-                            + f"--coupling_distribution={args.coupling_distribution} " \
-                            + f"--coupling_sparsity={args.coupling_sparsity} " \
-                            + f"--coupling_scale={args.coupling_scale} " \
-                            + f"--tuning_distribution={args.tuning_distribution} " \
-                            + f"--tuning_sparsity={args.tuning_sparsity} " \
-                            + f"--coupling_scale={args.coupling_scale} " \
-                            + f"--corr_cluster={args.corr_cluster} " \
-                            + f"--corr_back={args.corr_back} " \
+                            + f"--tuning_loc_idx={jj} "
+                        if not lightweight:
+                            command += \
+                                + f"--n_coupling_lambdas={args.n_coupling_lambdas} " \
+                                + f"--coupling_lambda_lower={args.coupling_lambda_lower} " \
+                                + f"--coupling_lambda_upper={args.coupling_lambda_upper} " \
+                                + f"--n_tuning_lambdas={args.n_tuning_lambdas} " \
+                                + f"--tuning_lambda_lower={args.tuning_lambda_lower} " \
+                                + f"--tuning_lambda_upper={args.tuning_lambda_upper} " \
+                                + f"--fine_sweep_frac={args.fine_sweep_frac} " \
+                                + f"--max_K={args.max_K} " \
+                                + f"--cv={args.cv} " \
+                                + f"--coupling_distribution={args.coupling_distribution} " \
+                                + f"--coupling_sparsity={args.coupling_sparsity} " \
+                                + f"--coupling_scale={args.coupling_scale} " \
+                                + f"--tuning_distribution={args.tuning_distribution} " \
+                                + f"--tuning_sparsity={args.tuning_sparsity} " \
+                                + f"--coupling_scale={args.coupling_scale} " \
+                                + f"--corr_cluster={args.corr_cluster} " \
+                                + f"--corr_back={args.corr_back} "
+                        command += \
                             + f"--solver={args.solver} " \
                             + f"--initialization={args.initialization} " \
                             + f"--max_iter={args.max_iter} " \
@@ -124,7 +130,7 @@ def main(args):
                             + f"--tuning_rng={tuning_rng} " \
                             + f"--dataset_rng={dataset_rng} " \
                             + f"--fitter_rng={fitter_rng}"
-                        if args.no_warn:
+                        if no_warn:
                             command += " --no_warn &\n"
                         else:
                             command += "&\n"
@@ -196,7 +202,9 @@ if __name__ == '__main__':
     parser.add_argument('--tuning_rng', type=int, default=1)
     parser.add_argument('--dataset_rng', type=int, default=1)
     parser.add_argument('--fitter_rng', type=int, default=-1)
+    # Other options
     parser.add_argument('--no_warn', action='store_true')
+    parser.add_argument('--lightweight', action='store_true')
     args = parser.parse_args()
 
     main(args)
