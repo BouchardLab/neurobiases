@@ -102,7 +102,7 @@ def main(args):
                             + f"--tuning_loc_max={tuning_loc_max} " \
                             + f"--tuning_loc_idx={jj} "
                         if not lightweight:
-                            command += \
+                            command = command \
                                 + f"--n_coupling_lambdas={args.n_coupling_lambdas} " \
                                 + f"--coupling_lambda_lower={args.coupling_lambda_lower} " \
                                 + f"--coupling_lambda_upper={args.coupling_lambda_upper} " \
@@ -120,8 +120,8 @@ def main(args):
                                 + f"--coupling_scale={args.coupling_scale} " \
                                 + f"--corr_cluster={args.corr_cluster} " \
                                 + f"--corr_back={args.corr_back} "
-                        command += \
-                            + f"--solver={args.solver} " \
+                        command = command + \
+                            f"--solver={args.solver} " \
                             + f"--initialization={args.initialization} " \
                             + f"--max_iter={args.max_iter} " \
                             + f"--tol={args.tol} " \
@@ -129,7 +129,7 @@ def main(args):
                             + f"--coupling_rng={coupling_rng} " \
                             + f"--tuning_rng={tuning_rng} " \
                             + f"--dataset_rng={dataset_rng} " \
-                            + f"--fitter_rng={fitter_rng}"
+                            + f"--fitter_rng={fitter_rng} "
                         if no_warn:
                             command += " --no_warn &\n"
                         else:
