@@ -86,11 +86,16 @@ def main(args):
             for jj in range(n_tuning_locs):
                 for kk, (coupling_rng, tuning_rng) in enumerate(zip(coupling_rngs, tuning_rngs)):
                     for ll, dataset_rng in enumerate(dataset_rngs):
+                        # Hacky
+                        if n_models == 1:
+                            save_path = f"{save_folder}/{tag}_{ii}_{jj}_{ll}.h5"
+                        else:
+                            save_path = f"{save_folder}/{tag}_{kk}_{ii}_{jj}_{ll}.h5"
                         counter += 1
                         command = \
                             f"srun -N {n_nodes} -n {n_tasks} -c $OMP_NUM_THREADS " \
                             + f"shifter python -u {script_path} " \
-                            + f"--save_path={save_folder}/{model_fit}_{ii}_{jj}_{kk}_{ll}.h5 " \
+                            + f"--save_path={save_path} " \
                             + f"--model_fit={model_fit} " \
                             + f"--N={N} --M={M} --K={K} --D={D} " \
                             + f"--n_coupling_locs={n_coupling_locs} " \

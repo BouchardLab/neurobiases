@@ -246,12 +246,12 @@ if __name__ == '__main__':
     parser.add_argument('--D', type=int, default=1000)
     # Variable model hyperparameters
     parser.add_argument('--n_coupling_locs', type=int, default=30)
-    parser.add_argument('--coupling_loc_min', type=float, default=-3)
-    parser.add_argument('--coupling_loc_max', type=float, default=3)
+    parser.add_argument('--coupling_loc_min', type=float, default=-2)
+    parser.add_argument('--coupling_loc_max', type=float, default=2)
     parser.add_argument('--coupling_loc_idx', type=int, default=0)
     parser.add_argument('--n_tuning_locs', type=int, default=30)
-    parser.add_argument('--tuning_loc_min', type=float, default=-3)
-    parser.add_argument('--tuning_loc_max', type=float, default=3)
+    parser.add_argument('--tuning_loc_min', type=float, default=-2)
+    parser.add_argument('--tuning_loc_max', type=float, default=2)
     parser.add_argument('--tuning_loc_idx', type=int, default=0)
     # CV fitting hyperparameters
     parser.add_argument('--n_coupling_lambdas', type=int, default=25)
