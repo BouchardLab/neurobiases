@@ -39,7 +39,6 @@ def main(args):
     tuning_lambdas = np.logspace(args.tuning_lambda_lower,
                                  args.tuning_lambda_upper,
                                  num=n_tuning_lambdas)
-    print(tuning_lambdas)
     Ks = np.arange(args.max_K) + 1
 
     # Process random seeds for model
@@ -132,10 +131,6 @@ def main(args):
     # Verbosity update
     if rank == 0:
         t1 = time.time()
-        print('FINE SWEEP')
-        print(coupling_lambdas)
-        print(tuning_lambdas)
-        print(Ks)
 
     # Run broad sweep CV
     fine_sweep_results = \
