@@ -39,6 +39,7 @@ def main(args):
     tuning_lambdas = np.logspace(args.tuning_lambda_lower,
                                  args.tuning_lambda_upper,
                                  num=n_tuning_lambdas)
+    print(tuning_lambdas)
     Ks = np.arange(args.max_K) + 1
 
     # Process random seeds for model
@@ -111,7 +112,7 @@ def main(args):
         best_c_coupling = coupling_lambdas[best_hyps[0]]
         best_c_tuning = tuning_lambdas[best_hyps[1]]
         if model_fit == 'em':
-            Ks = np.array([best_hyps[2]])
+            Ks = np.array([Ks[best_hyps[2]]])
         # Create new hyperparameter set
         coupling_lambda_lower = args.fine_sweep_frac * best_c_coupling
         coupling_lambda_upper = (1. / args.fine_sweep_frac) * best_c_coupling
@@ -131,6 +132,10 @@ def main(args):
     # Verbosity update
     if rank == 0:
         t1 = time.time()
+        print('FINE SWEEP')
+        print(coupling_lambdas)
+        print(tuning_lambdas)
+        print(Ks)
 
     # Run broad sweep CV
     fine_sweep_results = \
@@ -219,7 +224,10 @@ def main(args):
             results.attrs['coupling_rng'] = args.coupling_rng
             results.attrs['tuning_rng'] = args.tuning_rng
             results.attrs['dataset_rng'] = args.dataset_rng
-            results.attrs['fitter_rng'] = fitter_rng
+            if fitter_rng is None:
+                results.attrs['fitter_rng'] = 'None'
+            else:
+                results.attrs['fitter_rng'] = fitter_rng
 
         t2 = time.time()
         print(
