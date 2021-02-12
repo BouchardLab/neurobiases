@@ -112,7 +112,7 @@ class EMSolver():
             for neuron in range(self.N):
                 current_mask = self.B_mask[:, neuron].astype('bool')
                 self.B[:, neuron][current_mask] = \
-                    self.rng.normal(loc=0., scale=3., size=(current_mask.sum()))
+                    self.rng.normal(loc=0., scale=1., size=(current_mask.sum()))
             # Noise parameters
             self.Psi_tr = self.rng.normal(loc=0., scale=1., size=(self.N + 1))
             self.L = self.rng.normal(loc=0., scale=0.1, size=(self.K, self.N + 1))
