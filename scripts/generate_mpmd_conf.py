@@ -72,7 +72,7 @@ def main(args):
                         save_path = f"{save_folder}/{tag}_{ii}_{jj}_{kk}_{ll}.h5"
                         command = \
                             f"{counter} shifter -E -e " \
-                            + f"HOME=/global/home/s/sachdeva/ mpirun -np {n_tasks} " \
+                            + f"HOME=/global/homes/s/sachdeva/ mpirun -np {n_tasks} " \
                             + f"-launcher fork python -u {script_path} " \
                             + f"--save_path={save_path} " \
                             + f"--model_fit={model_fit} " \
