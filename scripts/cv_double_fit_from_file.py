@@ -1,6 +1,7 @@
 import argparse
 import h5py
 import numpy as np
+import os
 import time
 import warnings
 
@@ -208,6 +209,7 @@ def main(args):
         print(
             "---------------------------------------------------------------\n"
             "Job complete: Performed a single CV coarse-fine sweep.\n"
+            f"File: {os.path.basename(file_path)}\n"
             f"Model: {N} coupling, {M} tuning, {K} latent, {D} samples\n"
             f"Number of processes: {size}\n"
             f"Total number of tasks: {n_total_tasks}\n"

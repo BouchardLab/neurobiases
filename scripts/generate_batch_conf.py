@@ -33,7 +33,7 @@ def main(args):
         f"#SBATCH -q {qos}\n"
         "#SBATCH -J nb\n"
         f"#SBATCH --output=/global/homes/s/sachdeva/out/neurobiases/{tag}.o\n"
-        f"#SBATCH --output=/global/homes/s/sachdeva/error/neurobiases/{tag}.o\n"
+        f"#SBATCH --error=/global/homes/s/sachdeva/error/neurobiases/{tag}.o\n"
         "#SBATCH --mail-user=pratik.sachdeva@berkeley.edu\n"
         "#SBATCH --mail-type=ALL\n"
         f"#SBATCH -t {time}\n"
@@ -43,10 +43,13 @@ def main(args):
     # Split files into groups assigned to each .conf file
     splits = (n_nodes * np.arange(n_confs))[1:]
     file_groups = np.array_split(files, splits)
+    n_groups = len(file_groups)
     # Iterate over each conf file
     for group_idx, file_group in enumerate(file_groups):
         conf_path = os.path.join(job_folder, f"{tag}_{group_idx}.conf")
-        batch_script += f"srun -n {n_nodes} -c 64 --multi-prog {conf_path}\n"
+        n_files = len(file_group)
+        batch_script += f"echo 'Job {group_idx + 1}/{n_groups}'\n"
+        batch_script += f"srun -n {n_files} -c 64 --multi-prog {conf_path}\n"
         # Open conf file for current group
         with open(conf_path, 'w') as conf:
             # Iterate over files in group
