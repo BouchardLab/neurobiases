@@ -48,7 +48,9 @@ def main(args):
     for group_idx, file_group in enumerate(file_groups):
         conf_path = os.path.join(job_folder, f"{tag}_{group_idx}.conf")
         n_files = len(file_group)
+        batch_script += "echo '==============================================================='\n"
         batch_script += f"echo 'Job {group_idx + 1}/{n_groups}'\n"
+        batch_script += "echo '==============================================================='\n"
         batch_script += f"srun -n {n_files} -c 64 --multi-prog {conf_path}\n"
         # Open conf file for current group
         with open(conf_path, 'w') as conf:
