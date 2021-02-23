@@ -16,7 +16,7 @@ def main(args):
     # Turn off convergence warning by default
     if not args.warn:
         warnings.filterwarnings('ignore', category=ConvergenceWarning)
-
+    verbose = args.verbose
     # Job settings
     file_path = args.file_path
     model_fit = args.model_fit
@@ -134,6 +134,9 @@ def main(args):
         tuning_lambdas = np.linspace(tuning_lambda_lower,
                                      tuning_lambda_upper,
                                      num=n_tuning_lambdas)
+        if verbose:
+            print(f'First sweep complete. Best coupling lambda: {best_c_coupling}'
+                  f' and best tuning lambda: {best_c_tuning}')
     # Broadcast new lambdas out
     coupling_lambdas = Bcast_from_root(coupling_lambdas, comm)
     tuning_lambdas = Bcast_from_root(tuning_lambdas, comm)
@@ -226,6 +229,7 @@ if __name__ == '__main__':
     parser.add_argument('--file_path', type=str)
     parser.add_argument('--model_fit', type=str)
     # Verbosity flags
+    parser.add_argument('--verbose', action='store_true')
     parser.add_argument('--cv_verbose', action='store_true')
     parser.add_argument('--fitter_verbose', action='store_true')
     parser.add_argument('--mstep_verbose', action='store_true')
