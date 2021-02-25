@@ -1,4 +1,5 @@
 import numpy as np
+import time
 
 from .EMSolver import EMSolver
 from .ITSFASolver import ITSFASolver
@@ -126,9 +127,6 @@ def cv_sparse_solver_single(
         elif method == 'tc':
             c_coupling, c_tuning, split_idx = values
 
-        if cv_verbose:
-            print(f'Rank {rank}, Task {task_idx}')
-
         # Pull out the indices for the current fold
         train_idx, test_idx = list(cv.split(X))[int(split_idx)]
         X_train = X[train_idx]
@@ -137,6 +135,9 @@ def cv_sparse_solver_single(
         X_test = X[test_idx]
         Y_test = Y[test_idx]
         y_test = y[test_idx]
+
+        if cv_verbose:
+            t0 = time.time()
 
         if method == 'em':
             fitter = EMSolver(
@@ -194,6 +195,14 @@ def cv_sparse_solver_single(
             mses[task_idx] = fitter.mse(X=X_test, Y=Y_test, y=y_test)
             # Calculate BIC
             bics[task_idx] = fitter.bic()
+
+        if cv_verbose:
+            elapsed = time.time() - t0
+            print(f"Rank {rank}, task {task_idx+1}/{len(tasks)} complete. "
+                  f"Elapsed time: {elapsed:0.2f}. "
+                  f"Coupling lambda: {c_coupling:0.3E}. "
+                  f"Tuning lambda: {c_tuning:0.3E}. "
+                  f"Split idx: {split_idx}.")
 
     if comm is not None:
         # Gather tasks across all storage arrays

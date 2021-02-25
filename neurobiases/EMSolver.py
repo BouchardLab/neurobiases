@@ -50,7 +50,7 @@ class EMSolver():
         self, X, Y, y, K, a_mask=None, b_mask=None, B_mask=None,
         B=None, L_nt=None, L=None, Psi_nt=None, Psi=None, Psi_transform='softplus',
         solver='scipy_lbfgs', max_iter=1000, tol=1e-4, c_tuning=0., c_coupling=0.,
-        initialization='zeros', rng=None, fa_rng=None
+        penalize_B=False, initialization='zeros', rng=None, fa_rng=None
     ):
         # tuning and coupling design matrices
         self.X = X
@@ -75,6 +75,7 @@ class EMSolver():
         else:
             self.c_coupling = c_coupling
             self.c_tuning = c_tuning
+        self.penalize_B = penalize_B
         self.rng = np.random.default_rng(rng)
         self.fa_rng = fa_rng
         # initialize masks
@@ -611,9 +612,17 @@ class EMSolver():
             optimize = minimize(
                 self.f_df_em, x0=params,
                 method='L-BFGS-B',
-                args=(self.X, self.Y, self.y, self.a_mask, self.b_mask, self.B_mask,
-                      self.train_B, self.train_L_nt, self.train_L, self.train_Psi_tr_nt,
-                      self.train_Psi_tr, mu, zz, sigma, 1., self.Psi_transform),
+                args=(self.X, self.Y, self.y,
+                      self.a_mask, self.b_mask, self.B_mask,
+                      self.train_B,
+                      self.train_L_nt,
+                      self.train_L,
+                      self.train_Psi_tr_nt,
+                      self.train_Psi_tr,
+                      mu, zz, sigma,
+                      1.,
+                      self.penalize_B,
+                      self.Psi_transform),
                 callback=callback,
                 jac=True)
             # extract optimized parameters
@@ -636,30 +645,37 @@ class EMSolver():
                                                   b_mask=self.b_mask,
                                                   B_mask=self.B_mask,
                                                   transform_tuning=True,
+                                                  penalize_B=self.penalize_B,
                                                   Psi_transform=self.Psi_transform)
-                    )
+                        )
             else:
                 progress = None
 
             # penalize both coupling and tuning
             if self.c_coupling != 0 and self.c_tuning != 0:
-                orthantwise_start = 0
-                orthantwise_end = self.N + self.M + self.N * self.M
                 tuning_to_coupling_ratio = float(self.c_tuning) / self.c_coupling
+                orthantwise_start = 0
+                if self.penalize_B:
+                    orthantwise_end = self.N + self.M + self.N * self.M
+                else:
+                    orthantwise_end = self.N + self.M
                 c = self.c_coupling
                 # transform tuning parameters
                 params[self.N:orthantwise_end] *= tuning_to_coupling_ratio
             # penalize only coupling
             elif self.c_tuning == 0 and self.c_coupling != 0:
+                tuning_to_coupling_ratio = 1.
                 orthantwise_start = 0
                 orthantwise_end = self.N
-                tuning_to_coupling_ratio = 1.
                 c = self.c_coupling
             # penalize only tuning
             elif self.c_coupling == 0 and self.c_tuning != 0:
-                orthantwise_start = self.N
-                orthantwise_end = self.N + self.M + self.N * self.M
                 tuning_to_coupling_ratio = 1.
+                orthantwise_start = self.N
+                if self.penalize_B:
+                    orthantwise_end = self.N + self.M + self.N * self.M
+                else:
+                    orthantwise_end = self.N + self.M
                 c = self.c_tuning
             # penalize neither
             else:
@@ -671,9 +687,16 @@ class EMSolver():
             # tuning params are transformed
             params = fmin_lbfgs(
                 self.f_df_em_owlbfgs, x0=params,
-                args=(self.X, self.Y, self.y, self.a_mask, self.b_mask, self.B_mask,
-                      self.train_B, self.train_L_nt, self.train_L, self.train_Psi_tr_nt,
-                      self.train_Psi_tr, mu, zz, sigma, tuning_to_coupling_ratio,
+                args=(self.X, self.Y, self.y,
+                      self.a_mask, self.b_mask, self.B_mask,
+                      self.train_B,
+                      self.train_L_nt,
+                      self.train_L,
+                      self.train_Psi_tr_nt,
+                      self.train_Psi_tr,
+                      mu, zz, sigma,
+                      tuning_to_coupling_ratio,
+                      self.penalize_B,
                       self.Psi_transform),
                 progress=progress,
                 orthantwise_c=c,
@@ -682,7 +705,8 @@ class EMSolver():
 
             a, b, B, Psi_tr, L = self.split_params(params)
             b = b / tuning_to_coupling_ratio
-            B = B / tuning_to_coupling_ratio
+            if self.penalize_B:
+                B = B / tuning_to_coupling_ratio
             # transform params back to original values
             params = np.concatenate((a.ravel(),
                                      b.ravel(),
@@ -1189,7 +1213,7 @@ class EMSolver():
     @staticmethod
     def f_df_em(params, X, Y, y, a_mask, b_mask, B_mask, train_B, train_L_nt,
                 train_L, train_Psi_tr_nt, train_Psi_tr, mu, zz, sigma,
-                tuning_to_coupling_ratio, Psi_transform='softplus'):
+                tuning_to_coupling_ratio, penalize_B=False, Psi_transform='softplus'):
         """Helper function for the M-step in the EM procedure. Calculates the
         expected complete log-likelihood and gradients with respect to all
         parameters.
@@ -1246,7 +1270,8 @@ class EMSolver():
         a, b, B, Psi_tr, L = EMSolver.split_tparams(tparams, N, M, K)
         # apply rescaling
         b = b / tuning_to_coupling_ratio
-        B = B / tuning_to_coupling_ratio
+        if penalize_B:
+            B = B / tuning_to_coupling_ratio
         # split up terms into target/non-target components
         Psi = utils.Psi_tr_to_Psi(Psi_tr, Psi_transform)
         Psi_nt = Psi[1:]
@@ -1531,7 +1556,8 @@ class EMSolver():
     @staticmethod
     def expected_complete_ll(
         params, X, Y, y, mu, zz, sigma, c_coupling=0., c_tuning=0., a_mask=None,
-        b_mask=None, B_mask=None, transform_tuning=False, Psi_transform='softplus'
+        b_mask=None, B_mask=None, transform_tuning=False, Psi_transform='softplus',
+        penalize_B=False
     ):
         """Calculate the expected complete log-likelihood."""
         D, M = X.shape
@@ -1576,7 +1602,8 @@ class EMSolver():
         if transform_tuning:
             tuning_to_coupling_ratio = c_tuning / c_coupling
             b = b / tuning_to_coupling_ratio
-            B = B / tuning_to_coupling_ratio
+            if penalize_B:
+                B = B / tuning_to_coupling_ratio
 
         y_residual = y.ravel() - X @ b - Y @ a
         Y_residual = Y - X @ B
