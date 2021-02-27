@@ -566,7 +566,7 @@ class EMSolver():
         return mu, zz, sigma
 
     def m_step(self, mu, zz, sigma, verbose=False, fista_max_iter=250,
-               fista_lr=1e-6):
+               fista_lr=1e-6, store_parameters=False):
         """Performs an M-step in the EM algorithm for the triangular model.
 
         Parameters
@@ -632,22 +632,28 @@ class EMSolver():
         elif self.solver == 'ow_lbfgs':
             # create callable for owlbfgs
             if verbose:
-                # create callback function
-                def progress(x, g, fx, xnorm, gnorm, step, k, num_eval, *args):
-                    # x is in the transformed space
-                    print(
-                        'Expected complete log-likelihood:',
-                        self.expected_complete_ll(x, self.X, self.Y, self.y,
-                                                  mu, zz, sigma,
-                                                  c_coupling=self.c_coupling,
-                                                  c_tuning=self.c_tuning,
-                                                  a_mask=self.a_mask,
-                                                  b_mask=self.b_mask,
-                                                  B_mask=self.B_mask,
-                                                  transform_tuning=True,
-                                                  penalize_B=self.penalize_B,
-                                                  Psi_transform=self.Psi_transform)
-                        )
+                if store_parameters:
+                    def progress(x, g, fx, xnorm, gnorm, step, k, num_eval, *args):
+                        storage['n_iterations'][k] = 1
+                        storage['a'][k] = x[:self.N]
+                        storage['b'][k] = x[self.N:self.N+self.M]
+                else:
+                    # create callback function
+                    def progress(x, g, fx, xnorm, gnorm, step, k, num_eval, *args):
+                        # x is in the transformed space
+                        print(
+                            'Expected complete log-likelihood:',
+                            self.expected_complete_ll(x, self.X, self.Y, self.y,
+                                                      mu, zz, sigma,
+                                                      c_coupling=self.c_coupling,
+                                                      c_tuning=self.c_tuning,
+                                                      a_mask=self.a_mask,
+                                                      b_mask=self.b_mask,
+                                                      B_mask=self.B_mask,
+                                                      transform_tuning=True,
+                                                      penalize_B=self.penalize_B,
+                                                      Psi_transform=self.Psi_transform)
+                            )
             else:
                 progress = None
 
@@ -685,6 +691,13 @@ class EMSolver():
                 tuning_to_coupling_ratio = 1.
 
             # tuning params are transformed
+            if store_parameters:
+                storage = {}
+                storage['n_iterations'] = np.zeros(10000)
+                storage['a'] = np.zeros((10000, self.N))
+                storage['b'] = np.zeros((10000, self.M))
+            else:
+                storage = None
             params = fmin_lbfgs(
                 self.f_df_em_owlbfgs, x0=params,
                 args=(self.X, self.Y, self.y,
@@ -697,7 +710,8 @@ class EMSolver():
                       mu, zz, sigma,
                       tuning_to_coupling_ratio,
                       self.penalize_B,
-                      self.Psi_transform),
+                      self.Psi_transform,
+                      storage),
                 progress=progress,
                 orthantwise_c=c,
                 orthantwise_start=orthantwise_start,
@@ -743,11 +757,12 @@ class EMSolver():
         else:
             raise ValueError(f'Solver {self.solver} not available.')
 
-        return params
+        return params, storage
 
     def fit_em(
         self, refit=False, verbose=False, mstep_verbose=False, mll_curve=False,
-        sparsity_verbose=False, fista_max_iter=250, fista_lr=1e-6
+        sparsity_verbose=False, fista_max_iter=250, fista_lr=1e-6,
+        store_parameters=False
     ):
         """Fit the triangular model parameters using the EM algorithm.
 
@@ -785,10 +800,12 @@ class EMSolver():
             # run E-step
             mu, zz, sigma = self.e_step()
             # run M-step
-            params = self.m_step(mu, zz, sigma,
-                                 verbose=mstep_verbose,
-                                 fista_max_iter=fista_max_iter,
-                                 fista_lr=fista_lr)
+            params, storage = self.m_step(
+                mu, zz, sigma,
+                verbose=mstep_verbose,
+                fista_max_iter=fista_max_iter,
+                fista_lr=fista_lr,
+                store_parameters=store_parameters)
             self.a, self.b, self.B, self.Psi_tr, self.L = self.split_params(params)
             iteration += 1
             # update marginal log-likelihood
@@ -1213,7 +1230,8 @@ class EMSolver():
     @staticmethod
     def f_df_em(params, X, Y, y, a_mask, b_mask, B_mask, train_B, train_L_nt,
                 train_L, train_Psi_tr_nt, train_Psi_tr, mu, zz, sigma,
-                tuning_to_coupling_ratio, penalize_B=False, Psi_transform='softplus'):
+                tuning_to_coupling_ratio, penalize_B=False, Psi_transform='softplus',
+                storage=None):
         """Helper function for the M-step in the EM procedure. Calculates the
         expected complete log-likelihood and gradients with respect to all
         parameters.
