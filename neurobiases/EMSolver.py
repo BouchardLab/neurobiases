@@ -588,7 +588,6 @@ class EMSolver():
         """
         # grab params, default values
         params = self.get_params()
-
         # use scipy's lbfgs solver (can't handle sparsity)
         if self.solver == 'scipy_lbfgs':
             # create callable for scipy function
@@ -631,32 +630,30 @@ class EMSolver():
         # use orthant-wise lbfgs solver (for sparse situations)
         elif self.solver == 'ow_lbfgs':
             # create callable for owlbfgs
-            if verbose:
-                if store_parameters:
-                    def progress(x, g, fx, xnorm, gnorm, step, k, num_eval, *args):
-                        storage['n_iterations'][k] = 1
-                        storage['a'][k] = x[:self.N]
-                        storage['b'][k] = x[self.N:self.N+self.M]
-                else:
-                    # create callback function
-                    def progress(x, g, fx, xnorm, gnorm, step, k, num_eval, *args):
-                        # x is in the transformed space
-                        print(
-                            'Expected complete log-likelihood:',
-                            self.expected_complete_ll(x, self.X, self.Y, self.y,
-                                                      mu, zz, sigma,
-                                                      c_coupling=self.c_coupling,
-                                                      c_tuning=self.c_tuning,
-                                                      a_mask=self.a_mask,
-                                                      b_mask=self.b_mask,
-                                                      B_mask=self.B_mask,
-                                                      transform_tuning=True,
-                                                      penalize_B=self.penalize_B,
-                                                      Psi_transform=self.Psi_transform)
-                            )
+            if store_parameters:
+                def progress(x, g, fx, xnorm, gnorm, step, k, num_eval, *args):
+                    storage['n_iterations'][k-1] = 1
+                    storage['a'][k-1] = x[:self.N]
+                    storage['b'][k-1] = x[self.N:self.N+self.M]
+            elif verbose:
+                # create callback function
+                def progress(x, g, fx, xnorm, gnorm, step, k, num_eval, *args):
+                    # x is in the transformed space
+                    print(
+                        'Expected complete log-likelihood:',
+                        self.expected_complete_ll(x, self.X, self.Y, self.y,
+                                                  mu, zz, sigma,
+                                                  c_coupling=self.c_coupling,
+                                                  c_tuning=self.c_tuning,
+                                                  a_mask=self.a_mask,
+                                                  b_mask=self.b_mask,
+                                                  B_mask=self.B_mask,
+                                                  transform_tuning=True,
+                                                  penalize_B=self.penalize_B,
+                                                  Psi_transform=self.Psi_transform)
+                    )
             else:
                 progress = None
-
             # penalize both coupling and tuning
             if self.c_coupling != 0 and self.c_tuning != 0:
                 tuning_to_coupling_ratio = float(self.c_tuning) / self.c_coupling
@@ -693,7 +690,7 @@ class EMSolver():
             # tuning params are transformed
             if store_parameters:
                 storage = {}
-                storage['n_iterations'] = np.zeros(10000)
+                storage['n_iterations'] = np.zeros(10000, dtype=np.int64)
                 storage['a'] = np.zeros((10000, self.N))
                 storage['b'] = np.zeros((10000, self.M))
             else:
@@ -794,6 +791,9 @@ class EMSolver():
         if verbose:
             print('Initial marginal likelihood: %f' % base_mll)
 
+        if store_parameters:
+            a_path = []
+
         # EM iteration loop: convergence if tolerance or maximum iterations
         # are reached
         while (del_ml > self.tol) and (iteration < self.max_iter):
@@ -806,6 +806,10 @@ class EMSolver():
                 fista_max_iter=fista_max_iter,
                 fista_lr=fista_lr,
                 store_parameters=store_parameters)
+            if store_parameters:
+                n_steps = np.sum(storage['n_iterations'])
+                a_path.append(storage['a'][:n_steps])
+
             self.a, self.b, self.B, self.Psi_tr, self.L = self.split_params(params)
             iteration += 1
             # update marginal log-likelihood
@@ -825,6 +829,9 @@ class EMSolver():
                         f'Coupling SR = {coupling_sr:0.3f}, Tuning SR = {tuning_sr:0.3f}'
                     print(sparsity_statement)
         self.n_iterations = iteration + 1
+
+        if store_parameters:
+            self.a_path = np.concatenate(a_path, axis=0)
 
         if refit:
             a_mask = self.a.ravel() != 0
