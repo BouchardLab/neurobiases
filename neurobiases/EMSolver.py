@@ -632,9 +632,30 @@ class EMSolver():
             # create callable for owlbfgs
             if store_parameters:
                 def progress(x, g, fx, xnorm, gnorm, step, k, num_eval, *args):
+                    # Expand arrays if we have run out of storage
+                    if storage['n_iterations'][-1] == 1:
+                        storage['n_iterations'] = np.concatenate(
+                            (storage['n_iterations'],
+                             np.zeros(10000, dtype=np.int64)))
+                        storage['a'] = np.concatenate(
+                            (storage['a'],
+                             np.zeros((10000, self.N))),
+                            axis=0)
+                        storage['b'] = np.concatenate(
+                            (storage['b'],
+                             np.zeros((10000, self.M))),
+                            axis=0)
+                        storage['Psi'] = np.concatenate(
+                            (storage['Psi'],
+                             np.zeros((10000, self.N + 1))),
+                            axis=0)
+                    # Include most recent parameter estimates in arrays
                     storage['n_iterations'][k-1] = 1
                     storage['a'][k-1] = x[:self.N]
                     storage['b'][k-1] = x[self.N:self.N+self.M]
+                    Psi_idx = self.N + self.M + self.N * self.M
+                    Psi_tr = x[Psi_idx:Psi_idx + self.N + 1]
+                    storage['Psi'][k-1] = self.Psi_tr_to_Psi(Psi_tr)
             elif verbose:
                 # create callback function
                 def progress(x, g, fx, xnorm, gnorm, step, k, num_eval, *args):
@@ -690,9 +711,10 @@ class EMSolver():
             # tuning params are transformed
             if store_parameters:
                 storage = {}
-                storage['n_iterations'] = np.zeros(10000, dtype=np.int64)
+                storage['n_iterations'] = np.zeros(10, dtype=np.int64)
                 storage['a'] = np.zeros((10000, self.N))
                 storage['b'] = np.zeros((10000, self.M))
+                storage['Psi'] = np.zeros((10000, self.N + 1))
             else:
                 storage = None
             params = fmin_lbfgs(
@@ -758,8 +780,7 @@ class EMSolver():
 
     def fit_em(
         self, refit=False, verbose=False, mstep_verbose=False, mll_curve=False,
-        sparsity_verbose=False, fista_max_iter=250, fista_lr=1e-6,
-        store_parameters=False
+        fista_max_iter=250, fista_lr=1e-6, store_parameters=False
     ):
         """Fit the triangular model parameters using the EM algorithm.
 
@@ -793,6 +814,8 @@ class EMSolver():
 
         if store_parameters:
             a_path = []
+            b_path = []
+            Psi_path = []
 
         # EM iteration loop: convergence if tolerance or maximum iterations
         # are reached
@@ -809,6 +832,8 @@ class EMSolver():
             if store_parameters:
                 n_steps = np.sum(storage['n_iterations'])
                 a_path.append(storage['a'][:n_steps])
+                b_path.append(storage['b'][:n_steps])
+                Psi_path.append(storage['Psi'][:n_steps])
 
             self.a, self.b, self.B, self.Psi_tr, self.L = self.split_params(params)
             iteration += 1
@@ -820,18 +845,16 @@ class EMSolver():
             mlls[iteration] = current_mll
 
             if verbose:
-                print('Iteration %s, del=%0.9f, mll=%f' % (iteration, del_ml,
-                                                           mlls[iteration]))
-                if sparsity_verbose:
-                    coupling_sr = np.count_nonzero(self.a) / self.N
-                    tuning_sr = np.count_nonzero(self.b) / self.M
-                    sparsity_statement = \
-                        f'Coupling SR = {coupling_sr:0.3f}, Tuning SR = {tuning_sr:0.3f}'
-                    print(sparsity_statement)
+                print(
+                    f'Iteration {iteration}: '
+                    f'del={del_ml:0.5E}, '
+                    f'mll={mlls[iteration]:0.7E}')
         self.n_iterations = iteration + 1
 
         if store_parameters:
             self.a_path = np.concatenate(a_path, axis=0)
+            self.b_path = np.concatenate(b_path, axis=0)
+            self.Psi_path = np.concatenate(Psi_path, axis=0)
 
         if refit:
             a_mask = self.a.ravel() != 0
@@ -842,8 +865,8 @@ class EMSolver():
                 print('Refitting EM estimates with new masks.')
             return self.fit_em(
                 refit=False, verbose=verbose, mstep_verbose=mstep_verbose,
-                mll_curve=mll_curve, sparsity_verbose=sparsity_verbose,
-                fista_max_iter=fista_max_iter, fista_lr=fista_lr)
+                mll_curve=mll_curve, fista_max_iter=fista_max_iter,
+                fista_lr=fista_lr)
         else:
             if mll_curve:
                 return mlls[:iteration]
