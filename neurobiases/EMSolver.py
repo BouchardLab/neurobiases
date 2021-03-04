@@ -813,6 +813,7 @@ class EMSolver():
             print('Initial marginal likelihood: %f' % base_mll)
 
         if store_parameters:
+            steps = []
             a_path = []
             b_path = []
             Psi_path = []
@@ -831,6 +832,7 @@ class EMSolver():
                 store_parameters=store_parameters)
             if store_parameters:
                 n_steps = np.sum(storage['n_iterations'])
+                steps.append(n_steps)
                 a_path.append(storage['a'][:n_steps])
                 b_path.append(storage['b'][:n_steps])
                 Psi_path.append(storage['Psi'][:n_steps])
@@ -852,6 +854,7 @@ class EMSolver():
         self.n_iterations = iteration + 1
 
         if store_parameters:
+            self.steps = np.array(steps)
             self.a_path = np.concatenate(a_path, axis=0)
             self.b_path = np.concatenate(b_path, axis=0)
             self.Psi_path = np.concatenate(Psi_path, axis=0)
