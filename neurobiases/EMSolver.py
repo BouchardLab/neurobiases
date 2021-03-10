@@ -637,6 +637,10 @@ class EMSolver():
                         storage['n_iterations'] = np.concatenate(
                             (storage['n_iterations'],
                              np.zeros(10000, dtype=np.int64)))
+                        storage['ll'] = np.concatenate(
+                            (storage['ll'],
+                             np.zeros(10000, dtype=np.int64))
+                        )
                         storage['a'] = np.concatenate(
                             (storage['a'],
                              np.zeros((10000, self.N))),
@@ -651,6 +655,17 @@ class EMSolver():
                             axis=0)
                     # Include most recent parameter estimates in arrays
                     storage['n_iterations'][k-1] = 1
+                    storage['ll'][k-1] = self.expected_complete_ll(
+                        x, self.X, self.Y, self.y,
+                        mu, zz, sigma,
+                        c_coupling=self.c_coupling,
+                        c_tuning=self.c_tuning,
+                        a_mask=self.a_mask,
+                        b_mask=self.b_mask,
+                        B_mask=self.B_mask,
+                        transform_tuning=True,
+                        penalize_B=self.penalize_B,
+                        Psi_transform=self.Psi_transform)
                     storage['a'][k-1] = x[:self.N]
                     storage['b'][k-1] = x[self.N:self.N+self.M]
                     Psi_idx = self.N + self.M + self.N * self.M
@@ -711,7 +726,8 @@ class EMSolver():
             # tuning params are transformed
             if store_parameters:
                 storage = {}
-                storage['n_iterations'] = np.zeros(10, dtype=np.int64)
+                storage['ll'] = np.zeros(10000)
+                storage['n_iterations'] = np.zeros(10000, dtype=np.int64)
                 storage['a'] = np.zeros((10000, self.N))
                 storage['b'] = np.zeros((10000, self.M))
                 storage['Psi'] = np.zeros((10000, self.N + 1))
@@ -814,6 +830,7 @@ class EMSolver():
 
         if store_parameters:
             steps = []
+            ll_path = []
             a_path = []
             b_path = []
             Psi_path = []
@@ -833,6 +850,7 @@ class EMSolver():
             if store_parameters:
                 n_steps = np.sum(storage['n_iterations'])
                 steps.append(n_steps)
+                ll_path.append(storage['ll'][:n_steps])
                 a_path.append(storage['a'][:n_steps])
                 b_path.append(storage['b'][:n_steps])
                 Psi_path.append(storage['Psi'][:n_steps])
@@ -855,6 +873,7 @@ class EMSolver():
 
         if store_parameters:
             self.steps = np.array(steps)
+            self.ll_path = np.concatenate(ll_path, axis=0)
             self.a_path = np.concatenate(a_path, axis=0)
             self.b_path = np.concatenate(b_path, axis=0)
             self.Psi_path = np.concatenate(Psi_path, axis=0)
