@@ -474,16 +474,19 @@ class EMSolver():
         )
         return mll
 
-    def marginal_likelihood_hessian(self):
+    def marginal_likelihood_hessian(self, mask=False):
         """Calculates the hessian of the marginal likelihood."""
         params = self.get_params()
+        a, b, B, Psi_tr, L = EMSolver.split_tparams(params, self.N, self.M, self.K)
+        Psi = self.Psi_tr_to_Psi(Psi_tr)
+        params = np.concatenate((a.ravel(), b.ravel(), B.ravel(), Psi.ravel(), L.ravel()))
+
         n_params = params.size
         tparams = torch.tensor(params, requires_grad=True)
-        a, b, B, Psi_tr, L = EMSolver.split_tparams(
+        a, b, B, Psi, L = EMSolver.split_tparams(
             tparams, self.N, self.M, self.K
         )
 
-        Psi = self.Psi_tr_to_Psi(self.Psi_tr)
         Psi_t = Psi[0]
         Psi_nt = Psi[1:].reshape(self.N, 1)  # N x 1
         l_t = L[:, 0].reshape(self.K, 1)  # K x 1
@@ -507,20 +510,26 @@ class EMSolver():
             torch.cat((c0, c.t()), dim=1),
             torch.cat((c, C), dim=1)),
             dim=0)
-        sigma_det = torch.det(sigma)
 
         residual = y_cat - mu
-        ll = self.D / 2. * torch.log(sigma_det) \
+        ll = self.D / 2. * torch.logdet(sigma) \
             + 0.5 * torch.sum(residual.t() * torch.solve(residual.t(), sigma)[0])
 
         grads = torch.autograd.grad(ll, tparams, create_graph=True)[0]
         hessian = np.zeros((n_params, n_params))
 
         for idx, grad in enumerate(grads):
-            hessian[idx] = \
-                torch.autograd.grad(grad, tparams, retain_graph=True)[0].detach().numpy()
+            partial = torch.autograd.grad(grad, tparams, retain_graph=True)[0].detach().numpy()
+            hessian[idx] += partial
+            hessian[:, idx] += partial
 
-        return grads.detach().numpy(), hessian
+        if mask:
+            a_idx = np.argwhere(self.a_mask.ravel() == 0).ravel()
+            b_idx = self.N + np.argwhere(self.b_mask.ravel() == 0).ravel()
+            idx = np.concatenate((a_idx, b_idx))
+            hessian = np.delete(np.delete(hessian, idx, axis=0), idx, axis=1)
+
+        return hessian / 2.
 
     def e_step(self):
         """Performs an E-step in the EM algorithm for the triangular model.
@@ -655,17 +664,26 @@ class EMSolver():
                             axis=0)
                     # Include most recent parameter estimates in arrays
                     storage['n_iterations'][k-1] = 1
-                    storage['ll'][k-1] = self.expected_complete_ll(
-                        x, self.X, self.Y, self.y,
-                        mu, zz, sigma,
-                        c_coupling=self.c_coupling,
-                        c_tuning=self.c_tuning,
+                    storage['ll'][k-1] = utils.marginal_log_likelihood_linear_tm(
+                        X=self.X,
+                        Y=self.Y,
+                        y=self.y,
+                        a=x[:self.N],
+                        b=x[self.N:self.N+self.M],
+                        B=x[(self.N + self.M):(self.N + self.M + self.M * self.N)].reshape(
+                            (self.M, self.N)
+                        ),
+                        L=x[(self.N + self.M + self.N * self.M + self.N + 1):].reshape(
+                            (self.K, self.N + 1)
+                        ),
+                        Psi=self.Psi_tr_to_Psi(
+                            x[(self.N + self.M + self.M * self.N):
+                              (self.N + self.M + self.M * self.N + self.N + 1)]
+                        ),
                         a_mask=self.a_mask,
                         b_mask=self.b_mask,
-                        B_mask=self.B_mask,
-                        transform_tuning=True,
-                        penalize_B=self.penalize_B,
-                        Psi_transform=self.Psi_transform)
+                        B_mask=self.B_mask
+                    )
                     storage['a'][k-1] = x[:self.N]
                     storage['b'][k-1] = x[self.N:self.N+self.M]
                     Psi_idx = self.N + self.M + self.N * self.M
@@ -1245,11 +1263,10 @@ class EMSolver():
             torch.cat((c0, c.t()), dim=1),
             torch.cat((c, C), dim=1)),
             dim=0)
-        sigma_det = torch.det(sigma)
 
         # calculate loss and perform autograd
         residual = y_cat - mu
-        ll = D / 2. * torch.log(sigma_det) \
+        ll = D / 2. * torch.logdet(sigma) \
             + 0.5 * torch.sum(residual.t() * torch.solve(residual.t(), sigma)[0])
         ll.backward()
         loss = np.asscalar(ll.detach().numpy())
