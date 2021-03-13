@@ -306,7 +306,7 @@ class EMSolver():
         else:
             self.Psi_tr = np.zeros(self.N + 1)
 
-    def get_params(self):
+    def get_params(self, return_Psi=False):
         """Concatenates all parameters into a single vector.
 
         Returns
@@ -314,10 +314,14 @@ class EMSolver():
         params : np.ndarray, shape (N + M + N * M + N + 1 + K * (N + 1),)
             A vector containing all parameters concatenated together.
         """
+        if return_Psi:
+            Psi = self.Psi_tr_to_Psi(self.Psi_tr)
+        else:
+            Psi = self.Psi_tr
         params = np.concatenate((self.a.ravel(),
                                  self.b.ravel(),
                                  self.B.ravel(),
-                                 self.Psi_tr.ravel(),
+                                 Psi.ravel(),
                                  self.L.ravel()))
         return params
 
@@ -526,7 +530,11 @@ class EMSolver():
         if mask:
             a_idx = np.argwhere(self.a_mask.ravel() == 0).ravel()
             b_idx = self.N + np.argwhere(self.b_mask.ravel() == 0).ravel()
-            idx = np.concatenate((a_idx, b_idx))
+            n_entries = hessian.shape[0]
+            L_idx = np.arange(self.N + self.M + self.N * self.M + self.N + 1,
+                              n_entries)
+            L_idx = np.delete(L_idx, np.arange(0, L_idx.size, self.N + 1))
+            idx = np.concatenate((a_idx, b_idx, L_idx))
             hessian = np.delete(np.delete(hessian, idx, axis=0), idx, axis=1)
 
         return hessian / 2.
@@ -1184,7 +1192,7 @@ class EMSolver():
     @staticmethod
     def f_df_ml(
         params, X, Y, y, K, a_mask, b_mask, B_mask, train_B, train_L_nt, train_L,
-        train_Psi_tr_nt, train_Psi_tr, Psi_transform='softplus'
+        train_Psi_tr_nt, train_Psi_tr, Psi_transform='softplus', use_Psi=False
     ):
         """Helper function for parameter fitting with maximum likelihood.
         Calculates the log-likelihood of the neural activity and gradients
@@ -1229,6 +1237,12 @@ class EMSolver():
         # extract dimensions
         D, M = X.shape
         N = Y.shape[1]
+
+        if use_Psi:
+            a, b, B, Psi_tr, L = EMSolver.split_tparams(params, N, M, K)
+            Psi = utils.Psi_tr_to_Psi(Psi_tr, Psi_transform)
+            params = np.concatenate((a.ravel(), b.ravel(), B.ravel(), Psi.ravel(), L.ravel()))
+
         # turn parameters into torch tensors
         tparams = torch.tensor(params, requires_grad=True)
         a, b, B, Psi_tr, L = EMSolver.split_tparams(tparams, N, M, K)
@@ -1236,7 +1250,10 @@ class EMSolver():
         b = b * torch.tensor(b_mask, dtype=b.dtype)
         B = B * torch.tensor(B_mask, dtype=B.dtype)
         # split up terms into target/non-target components
-        Psi = utils.Psi_tr_to_Psi(Psi_tr, Psi_transform)
+        if use_Psi:
+            Psi = Psi_tr
+        else:
+            Psi = utils.Psi_tr_to_Psi(Psi_tr, Psi_transform)
         Psi_t = Psi[0]
         Psi_nt = Psi[1:].reshape(N, 1)  # N x 1
         l_t = L[:, 0].reshape(K, 1)  # K x 1
