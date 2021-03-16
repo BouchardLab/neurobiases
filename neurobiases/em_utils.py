@@ -4,6 +4,41 @@ import torch
 from .utils import inv_softplus
 
 
+def split_tparams(tparams, N, M, K):
+    """Splits torch params up into the respective variables.
+
+    Parameters
+    ----------
+    tparams : torch.tensor
+        Torch tensor containing all the parameters concatenated together.
+    N : int
+        The number of coupling parameters.
+    M : int
+        The number of tuning parameters.
+    K : int
+        The number of latent factors.
+
+    Returns
+    -------
+    a : torch.tensor, shape (N, 1)
+        The coupling parameters.
+    b : torch.tensor, shape (M, 1)
+        The tuning parameters.
+    B : torch.tensor, shape (M, N)
+        The non-target tuning parameters.
+    Psi_tr : torch.tensor, shape (N + 1,)
+        The private variances.
+    L : torch.tensor, shape (K, N+1)
+        The latent factors.
+    """
+    a = tparams[:N].reshape(N, 1)
+    b = tparams[N:(N + M)].reshape(M, 1)
+    B = tparams[(N + M):(N + M + N * M)].reshape(M, N)
+    Psi_tr = tparams[(N + M + N * M):(N + M + N * M + N + 1)].reshape(N + 1, 1)
+    L = tparams[(N + M + N * M + N + 1):].reshape(K, N + 1)
+    return a, b, B, Psi_tr, L
+
+
 def marginal_log_likelihood_linear_tm(
     X, Y, y, a, b, B, L, Psi, a_mask=None, b_mask=None, B_mask=None
 ):

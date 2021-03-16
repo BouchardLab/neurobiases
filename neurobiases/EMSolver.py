@@ -478,54 +478,27 @@ class EMSolver():
         )
         return mll
 
-    def marginal_likelihood_hessian(self, mask=False):
+    def marginal_likelihood_hessian(self, mask=False, wrt_Psi=True):
         """Calculates the hessian of the marginal likelihood."""
         params = self.get_params()
-        a, b, B, Psi_tr, L = EMSolver.split_tparams(params, self.N, self.M, self.K)
-        Psi = self.Psi_tr_to_Psi(Psi_tr)
-        params = np.concatenate((a.ravel(), b.ravel(), B.ravel(), Psi.ravel(), L.ravel()))
+        # Convert params to Psi if needed
+        if wrt_Psi:
+            a, b, B, Psi_tr, L = utils.split_tparams(params, self.N, self.M, self.K)
+            Psi = self.Psi_tr_to_Psi(Psi_tr)
+            params = np.concatenate((a.ravel(),
+                                     b.ravel(),
+                                     B.ravel(),
+                                     Psi.ravel(),
+                                     L.ravel()))
 
-        n_params = params.size
+        # Convert params to torch tensor
         tparams = torch.tensor(params, requires_grad=True)
-        a, b, B, Psi, L = EMSolver.split_tparams(
-            tparams, self.N, self.M, self.K
-        )
 
-        Psi_t = Psi[0]
-        Psi_nt = Psi[1:].reshape(self.N, 1)  # N x 1
-        l_t = L[:, 0].reshape(self.K, 1)  # K x 1
-        L_nt = L[:, 1:]  # K x N
+        def mll(tparams):
+            return self.f_mll(tparams, self.X, self.Y, self.y, self.K,
+                              self.Psi_transform, wrt_Psi)
 
-        # data
-        X = torch.tensor(self.X)  # D x M
-        Y = torch.tensor(self.Y)  # D x N
-        y = torch.tensor(self.y)  # D x 1
-        y_cat = torch.cat((y, Y), dim=1)
-
-        mu_t = torch.mm(X, b + torch.mm(B, a))  # D x 1
-        mu_nt = torch.mm(X, B)  # D x N
-        mu = torch.cat((mu_t, mu_nt), dim=1)
-        coupled_L = l_t + torch.mm(L_nt, a)  # K x 1
-
-        c0 = Psi_t + torch.mm(Psi_nt.t(), a**2) + torch.mm(coupled_L.t(), coupled_L)
-        c = Psi_nt * a + torch.mm(L_nt.t(), coupled_L)  # N x 1
-        C = torch.diag(torch.flatten(Psi_nt)) + torch.mm(L_nt.t(), L_nt)
-        sigma = torch.cat((
-            torch.cat((c0, c.t()), dim=1),
-            torch.cat((c, C), dim=1)),
-            dim=0)
-
-        residual = y_cat - mu
-        ll = self.D / 2. * torch.logdet(sigma) \
-            + 0.5 * torch.sum(residual.t() * torch.solve(residual.t(), sigma)[0])
-
-        grads = torch.autograd.grad(ll, tparams, create_graph=True)[0]
-        hessian = np.zeros((n_params, n_params))
-
-        for idx, grad in enumerate(grads):
-            partial = torch.autograd.grad(grad, tparams, retain_graph=True)[0].detach().numpy()
-            hessian[idx] += partial
-            hessian[:, idx] += partial
+        hessian = torch.autograd.functional.hessian(mll, inputs=tparams)
 
         if mask:
             a_idx = np.argwhere(self.a_mask.ravel() == 0).ravel()
@@ -537,7 +510,7 @@ class EMSolver():
             idx = np.concatenate((a_idx, b_idx, L_idx))
             hessian = np.delete(np.delete(hessian, idx, axis=0), idx, axis=1)
 
-        return hessian / 2.
+        return hessian
 
     def e_step(self):
         """Performs an E-step in the EM algorithm for the triangular model.
@@ -603,11 +576,15 @@ class EMSolver():
         params : np.ndarray, shape (N + M + N * M + N + 1 + K * (N + 1),)
             A vector containing all parameters concatenated together.
         """
-        # grab params, default values
+        # Get default values of parameters
         params = self.get_params()
-        # use scipy's lbfgs solver (can't handle sparsity)
+        # Storage variable set to None if unused
+        if not store_parameters:
+            storage = None
+
+        # Use scipy's LBFGS solver (can't apply sparsity)
         if self.solver == 'scipy_lbfgs':
-            # create callable for scipy function
+            # Create callback function for verbosity
             if verbose:
                 # create callback function
                 def callback(params):
@@ -644,7 +621,7 @@ class EMSolver():
             # extract optimized parameters
             params = optimize.x
 
-        # use orthant-wise lbfgs solver (for sparse situations)
+        # Use orthant-wise lbfgs solver (for sparse situations)
         elif self.solver == 'ow_lbfgs':
             # create callable for owlbfgs
             if store_parameters:
@@ -1155,44 +1132,8 @@ class EMSolver():
         return fig, axes
 
     @staticmethod
-    def split_tparams(tparams, N, M, K):
-        """Splits torch params up into the respective variables.
-
-        Parameters
-        ----------
-        tparams : torch.tensor
-            Torch tensor containing all the parameters concatenated together.
-        N : int
-            The number of coupling parameters.
-        M : int
-            The number of tuning parameters.
-        K : int
-            The number of latent factors.
-
-        Returns
-        -------
-        a : torch.tensor, shape (N, 1)
-            The coupling parameters.
-        b : torch.tensor, shape (M, 1)
-            The tuning parameters.
-        B : torch.tensor, shape (M, N)
-            The non-target tuning parameters.
-        Psi_tr : torch.tensor, shape (N + 1,)
-            The private variances.
-        L : torch.tensor, shape (K, N+1)
-            The latent factors.
-        """
-        a = tparams[:N].reshape(N, 1)
-        b = tparams[N:(N + M)].reshape(M, 1)
-        B = tparams[(N + M):(N + M + N * M)].reshape(M, N)
-        Psi_tr = tparams[(N + M + N * M):(N + M + N * M + N + 1)].reshape(N + 1, 1)
-        L = tparams[(N + M + N * M + N + 1):].reshape(K, N + 1)
-        return a, b, B, Psi_tr, L
-
-    @staticmethod
-    def f_df_ml(
-        params, X, Y, y, K, a_mask, b_mask, B_mask, train_B, train_L_nt, train_L,
-        train_Psi_tr_nt, train_Psi_tr, Psi_transform='softplus', use_Psi=False
+    def f_mll(
+        tparams, X, Y, y, K, Psi_transform='softplus', wrt_Psi=False
     ):
         """Helper function for parameter fitting with maximum likelihood.
         Calculates the log-likelihood of the neural activity and gradients
@@ -1234,23 +1175,13 @@ class EMSolver():
             variables whose training flag was set to False will have corresponding
             gradients set equal to zero.
         """
-        # extract dimensions
+        # Extract dimensions
         D, M = X.shape
         N = Y.shape[1]
+        a, b, B, Psi_tr, L = utils.split_tparams(tparams, N, M, K)
 
-        if use_Psi:
-            a, b, B, Psi_tr, L = EMSolver.split_tparams(params, N, M, K)
-            Psi = utils.Psi_tr_to_Psi(Psi_tr, Psi_transform)
-            params = np.concatenate((a.ravel(), b.ravel(), B.ravel(), Psi.ravel(), L.ravel()))
-
-        # turn parameters into torch tensors
-        tparams = torch.tensor(params, requires_grad=True)
-        a, b, B, Psi_tr, L = EMSolver.split_tparams(tparams, N, M, K)
-        a = a * torch.tensor(a_mask, dtype=a.dtype)
-        b = b * torch.tensor(b_mask, dtype=b.dtype)
-        B = B * torch.tensor(B_mask, dtype=B.dtype)
-        # split up terms into target/non-target components
-        if use_Psi:
+        # Split up terms into target/non-target components
+        if wrt_Psi:
             Psi = Psi_tr
         else:
             Psi = utils.Psi_tr_to_Psi(Psi_tr, Psi_transform)
@@ -1259,20 +1190,19 @@ class EMSolver():
         l_t = L[:, 0].reshape(K, 1)  # K x 1
         L_nt = L[:, 1:]  # K x N
 
-        # turn data into torch tensors
+        # Turn data into torch tensors
         X = torch.tensor(X)  # D x M
         Y = torch.tensor(Y)  # D x N
         y = torch.tensor(y)  # D x 1
         y_cat = torch.cat((y, Y), dim=1)
 
-        # useful terms for the marginal log-likelihood
+        # Useful terms for the marginal log-likelihood
         mu_t = torch.mm(X, b + torch.mm(B, a))  # D x 1
         mu_nt = torch.mm(X, B)  # D x N
         mu = torch.cat((mu_t, mu_nt), dim=1)
         coupled_L = l_t + torch.mm(L_nt, a)  # K x 1
 
-        # calculate marginal log-likelihood
-        # see paper for derivation
+        # Calculate marginal log-likelihood
         c0 = Psi_t + torch.mm(Psi_nt.t(), a**2) + torch.mm(coupled_L.t(), coupled_L)
         c = Psi_nt * a + torch.mm(L_nt.t(), coupled_L)  # N x 1
         C = torch.diag(torch.flatten(Psi_nt)) + torch.mm(L_nt.t(), L_nt)
@@ -1281,25 +1211,125 @@ class EMSolver():
             torch.cat((c, C), dim=1)),
             dim=0)
 
-        # calculate loss and perform autograd
+        # Calculate loss and perform autograd
         residual = y_cat - mu
-        ll = D / 2. * torch.logdet(sigma) \
+        ll = 0.5 * D * torch.logdet(sigma) \
+            + 0.5 * torch.sum(residual.t() * torch.solve(residual.t(), sigma)[0])
+        return ll
+
+    @staticmethod
+    def f_df_ml(
+        params, X, Y, y, K, a_mask, b_mask, B_mask, train_B=True,
+        train_L_nt=True, train_L=True, train_Psi_tr_nt=True,
+        train_Psi_tr=True, Psi_transform='softplus', wrt_Psi=False
+    ):
+        """Helper function for parameter fitting with maximum likelihood.
+        Calculates the log-likelihood of the neural activity and gradients
+        with respect to all parameters.
+
+        Parameters
+        ----------
+        X : np.ndarray, shape (D, M)
+            Design matrix for tuning features.
+        Y : np.ndarray, shape (D, N)
+            Design matrix for coupling features.
+        y : np.ndarray, shape (D, 1)
+            Neural response vector.
+        a_mask : np.ndarray, shape (N, 1)
+            Mask for coupling features.
+        b_mask : nd-array, shape (M, 1)
+            Mask for tuning features.
+        B_mask : nd-array, shape (N, M)
+            Mask for non-target neuron tuning features.
+        train_B : bool
+            If True, non-target tuning parameters will be trained.
+        train_L_nt : bool
+            If True, non-target latent factors will be trained.
+        train_L : bool
+            If True, latent factors will be trained. Takes precedence over
+            train_L_nt.
+        train_Psi_tr_nt : bool
+            If True, non-target private variances will be trained.
+        train_Psi_tr : bool
+            If True, private variances will be trained. Takes precedence over
+            train_Psi_tr_nt.
+
+        Returns
+        -------
+        loss : float
+            The marginal log-likelihood.
+        grad : np.ndarray
+            The gradient of the loss with respect to all parameters. Any
+            variables whose training flag was set to False will have corresponding
+            gradients set equal to zero.
+        """
+        # Extract dimensions
+        D, M = X.shape
+        N = Y.shape[1]
+
+        # Option to take derivative w.r.t Psi rather than Psi_tr
+        if wrt_Psi:
+            a, b, B, Psi_tr, L = utils.split_tparams(params, N, M, K)
+            Psi = utils.Psi_tr_to_Psi(Psi_tr, Psi_transform)
+            params = np.concatenate((a.ravel(), b.ravel(), B.ravel(), Psi.ravel(), L.ravel()))
+
+        # Turn parameters into torch tensors
+        tparams = torch.tensor(params, requires_grad=True)
+        a, b, B, Psi_tr, L = utils.split_tparams(tparams, N, M, K)
+        a = a * torch.tensor(a_mask, dtype=a.dtype)
+        b = b * torch.tensor(b_mask, dtype=b.dtype)
+        B = B * torch.tensor(B_mask, dtype=B.dtype)
+
+        # Split up terms into target/non-target components
+        if wrt_Psi:
+            Psi = Psi_tr
+        else:
+            Psi = utils.Psi_tr_to_Psi(Psi_tr, Psi_transform)
+        Psi_t = Psi[0]
+        Psi_nt = Psi[1:].reshape(N, 1)  # N x 1
+        l_t = L[:, 0].reshape(K, 1)  # K x 1
+        L_nt = L[:, 1:]  # K x N
+
+        # Turn data into torch tensors
+        X = torch.tensor(X)  # D x M
+        Y = torch.tensor(Y)  # D x N
+        y = torch.tensor(y)  # D x 1
+        y_cat = torch.cat((y, Y), dim=1)
+
+        # Useful terms for the marginal log-likelihood
+        mu_t = torch.mm(X, b + torch.mm(B, a))  # D x 1
+        mu_nt = torch.mm(X, B)  # D x N
+        mu = torch.cat((mu_t, mu_nt), dim=1)
+        coupled_L = l_t + torch.mm(L_nt, a)  # K x 1
+
+        # Calculate marginal log-likelihood
+        c0 = Psi_t + torch.mm(Psi_nt.t(), a**2) + torch.mm(coupled_L.t(), coupled_L)
+        c = Psi_nt * a + torch.mm(L_nt.t(), coupled_L)  # N x 1
+        C = torch.diag(torch.flatten(Psi_nt)) + torch.mm(L_nt.t(), L_nt)
+        sigma = torch.cat((
+            torch.cat((c0, c.t()), dim=1),
+            torch.cat((c, C), dim=1)),
+            dim=0)
+
+        # Calculate loss and perform autograd
+        residual = y_cat - mu
+        ll = 0.5 * D * torch.logdet(sigma) \
             + 0.5 * torch.sum(residual.t() * torch.solve(residual.t(), sigma)[0])
         ll.backward()
-        loss = np.asscalar(ll.detach().numpy())
+        loss = ll.detach().numpy().item()
         grad = tparams.grad.detach().numpy()
 
-        # apply masks to the gradient
+        # Apply masks to the gradient
         grad[:N] *= a_mask.ravel()
         grad[N:(N + M)] *= b_mask.ravel()
 
-        # if we're training non-target tuning parameters, apply selection mask
+        # If we're training non-target tuning parameters, apply selection mask
         if train_B:
             grad[(N + M):(N + M + N * M)] *= B_mask.ravel()
         else:
             grad[(N + M):(N + M + N * M)] = 0
 
-        # mask out gradients for parameters not being trained
+        # Mask out gradients for parameters not being trained
         if not train_Psi_tr_nt:
             grad[(N + M + N * M + 1):(N + M + N * M + N + 1)] = 0
         if not train_Psi_tr:
@@ -1371,7 +1401,7 @@ class EMSolver():
         K = mu.shape[1]
         # turn parameters into torch tensors
         tparams = torch.tensor(params, requires_grad=True)
-        a, b, B, Psi_tr, L = EMSolver.split_tparams(tparams, N, M, K)
+        a, b, B, Psi_tr, L = utils.split_tparams(tparams, N, M, K)
         # apply rescaling
         b = b / tuning_to_coupling_ratio
         if penalize_B:
