@@ -325,6 +325,36 @@ class EMSolver():
                                  self.L.ravel()))
         return params
 
+    def get_Psi(self):
+        """Returns the private variances."""
+        return self.Psi_tr_to_Psi(self.Psi_tr)
+
+    def get_Psi_t(self):
+        """Returns the target private variance."""
+        Psi = self.get_Psi()
+        return Psi[0]
+
+    def get_Psi_nt(self):
+        """Returns the non-target private variances."""
+        Psi = self.get_Psi()
+        return Psi[1:]
+
+    def get_l_t(self):
+        """Returns the target latent factor."""
+        return self.L[:, 0]
+
+    def get_L_nt(self):
+        """Returns the non-target latent factors."""
+        return self.L[:, 1:]
+
+    def get_residual_matrix(self):
+        """Returns the D x (N + 1) residual matrix for the neural activities."""
+        R = np.concatenate(
+            (self.y - self.X @ (self.b + self.B @ self.a),
+             self.Y - self.X @ self.B),
+            axis=1)
+        return R
+
     def split_params(self, params):
         """Splits a parameter vector into the corresponding parameters.
 
