@@ -347,6 +347,34 @@ class EMSolver():
         """Returns the non-target latent factors."""
         return self.L[:, 1:]
 
+    def get_marginal_cov_blocks(self):
+        Psi_t = self.get_Psi_t()
+        Psi_nt = np.diag(self.get_Psi_nt())
+        l_t = self.get_l_t()
+        L_nt = self.get_L_nt()
+        l_aug = l_t + L_nt @ self.a
+
+        c00 = Psi_t + self.a.T @ Psi_nt @ self.a + l_aug @ l_aug
+        c01 = self.a.T @ Psi_nt + l_aug.T @ L_nt
+        c10 = c01.T
+        c11 = Psi_nt + L_nt.T @ L_nt
+        return c00, c01, c10, c11
+
+    def get_marginal_cov(self):
+        c00, c01, c10, c11 = self.get_marginal_cov_blocks()
+        sigma = np.bmat(((c00, c01), (c10, c11)))
+        return sigma
+
+    def get_marginal_precision(self):
+        c0, _, c, C = self.get_marginal_cov_blocks()
+        Cc = np.linalg.solve(C, c)
+        p00 = 1. / (c0 - c.T @ Cc)
+        p10 = -p00 * Cc
+        p01 = p10.T
+        p11 = np.linalg.inv(C) + p00 * Cc @ Cc.T
+        precision = np.bmat(((p00, p01), (p10, p11)))
+        return precision
+
     def get_residual_matrix(self):
         """Returns the D x (N + 1) residual matrix for the neural activities."""
         R = np.concatenate(
