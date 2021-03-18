@@ -1,16 +1,29 @@
 import argparse
-import glob
+import h5py
 import numpy as np
-import os
 
 
 def main(args):
-    exp_folder = args.exp_folder
+    # Tag for the experiment
     tag = args.tag
+    # Folder containing the experiment parameters
+    params_folder = args.params_folder
+    # Folder containing the batch scripts
+    batch_folder = args.batch_folder
+    # Folder containing the outputs
+    output_folder = args.output_folder
+    # Folder containing the outputs
     script_path = args.script_path
-    job_folder = args.job_folder
+
+    # NERSC parameters
+    n_nodes = args.n_nodes
+    n_tasks = args.n_tasks
+    n_batch_scripts = args.n_batch_scripts
+    time = args.time
+    qos = args.qos
 
     # Experiment configuration
+    model_fit = args.model_fit
     N = args.N
     M = args.M
     K = args.K
@@ -71,31 +84,32 @@ def main(args):
         fitter_rng = args.fitter_rng
 
     n_jobs = n_coupling_locs * n_tuning_locs * n_models * n_datasets
-    n_batch_scripts = args.n_batch_scripts
     n_jobs_per_batch = int(np.ceil(n_jobs / n_batch_scripts))
 
     # Header of batch script
-    batch_header = lambda tag: (
-        "#!/bin/bash\n"
-        f"#SBATCH -N {n_nodes}\n"
-        "#SBATCH -C haswell\n"
-        f"#SBATCH -q {qos}\n"
-        "#SBATCH -J nb\n"
-        f"#SBATCH --output=/global/homes/s/sachdeva/out/neurobiases/{tag}.o\n"
-        f"#SBATCH --error=/global/homes/s/sachdeva/error/neurobiases/{tag}.o\n"
-        "#SBATCH --mail-user=pratik.sachdeva@berkeley.edu\n"
-        "#SBATCH --mail-type=ALL\n"
-        f"#SBATCH -t {time}\n"
-        f"#SBATCH --image=docker:pssachdeva/neuro2:latest\n\n"
-    )
+    def batch_header(out):
+        return (
+            "#!/bin/bash\n"
+            f"#SBATCH -N {n_nodes}\n"
+            "#SBATCH -C haswell\n"
+            f"#SBATCH -q {qos}\n"
+            "#SBATCH -J nb\n"
+            f"#SBATCH --output={output_folder}/{out}.o\n"
+            f"#SBATCH --error={output_folder}/{out}.o\n"
+            "#SBATCH --mail-user=pratik.sachdeva@berkeley.edu\n"
+            "#SBATCH --mail-type=ALL\n"
+            f"#SBATCH -t {time}\n"
+            f"#SBATCH --image=docker:pssachdeva/neuro:latest\n\n"
+            "export OMP_NUM_THREADS=1\n\n")
 
-    counter = 0
+    job_counter = 0
+    batch_counter = 0
     for ii, coupling_loc in enumerate(coupling_locs):
         for jj, tuning_loc in enumerate(tuning_locs):
             for kk, (coupling_rng, tuning_rng) in enumerate(zip(coupling_rngs, tuning_rngs)):
                 for ll, dataset_rng in enumerate(dataset_rngs):
-                    counter += 1
-                    save_path = f"{save_folder}/{tag}_{kk}_{ii}_{jj}_{ll}.h5"
+                    # Save path for current experiment
+                    save_path = f"{params_folder}/{tag}_{ii}_{jj}_{kk}_{ll}.h5"
                     # Load the model configuration
                     with h5py.File(save_path, 'w') as params:
                         # Triangular model hyperparameters
@@ -131,62 +145,49 @@ def main(args):
                         params.attrs['initialization'] = args.initialization
                         params.attrs['max_iter'] = args.max_iter
                         params.attrs['tol'] = args.tol
+                    # Create SBATCH command
+                    command = (
+                        f"srun -n {n_tasks} -c $OMP_NUM_THREADS shifter python "
+                        f"{script_path} --file_path={save_path} "
+                        f"--model_fit={model_fit}\n"
+                    )
 
-    # Find all configuration files matching the tag
-    files = glob.glob(f"{exp_folder}/{tag}*.h5")
-    n_files = len(files)
+                    # If we have reset the job counter, create a new batch script
+                    if job_counter == 0:
+                        batch_script = batch_header(f"{tag}_{batch_counter}")
+                        batch_path = f"{batch_folder}/{tag}_{batch_counter}.sh"
+                        batch_counter += 1
 
-    # Handle NERSC issues
-    n_nodes = args.n_nodes
-    n_tasks = args.n_tasks
-    time = args.time
-    qos = args.qos
-    n_confs = int(np.ceil(n_files / n_nodes))
+                    batch_script += "echo '================================='\n"
+                    batch_script += f"echo 'Job {job_counter + 1}/{n_jobs_per_batch}'\n"
+                    batch_script += "echo '================================='\n"
+                    batch_script += command
 
-    # Model arguments
-    model_fit = args.model_fit
-    warn = args.warn
-
-    # Split files into groups assigned to each .conf file
-    splits = (n_nodes * np.arange(n_confs))[1:]
-    file_groups = np.array_split(files, splits)
-    n_groups = len(file_groups)
-    # Iterate over each conf file
-    for group_idx, file_group in enumerate(file_groups):
-        conf_path = os.path.join(job_folder, f"{tag}_{group_idx}.conf")
-        n_files = len(file_group)
-        batch_script += "echo '==============================================================='\n"
-        batch_script += f"echo 'Job {group_idx + 1}/{n_groups}'\n"
-        batch_script += "echo '==============================================================='\n"
-        batch_script += f"srun -n {n_files} -c 64 --multi-prog {conf_path}\n"
-        # Open conf file for current group
-        with open(conf_path, 'w') as conf:
-            # Iterate over files in group
-            for idx, file_path in enumerate(file_group):
-                command = (
-                    f"srun -n {n_tasks} -c $OMP_NUM_THREADS shifter python "
-                    f"{args.script_path} --file_path="
-                    f"HOME=/global/homes/s/sachdeva/ mpirun -np {n_tasks} "
-                    f"-launcher fork python -u {script_path} "
-                    f"--file_path={file_path} "
-                    f"--model_fit={model_fit} "
-                )
-                if warn:
-                    command += " --warn"
-                command += "\n"
-                conf.write(command)
-
-    # Write batch script
-    batch_path = f"{job_folder}/{tag}.sh"
-    with open(batch_path, 'w') as batch:
-        batch.write(batch_script)
+                    job_counter += 1
+                    # If we're at the last counter, write file
+                    if job_counter == n_jobs_per_batch:
+                        with open(batch_path, 'w') as batch:
+                            batch.write(batch_script)
+                        # Reset job counter
+                        job_counter = 0
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run CV solver on triangular model.')
-    parser.add_argument('--save_folder', type=str)
+    # Required arguments
     parser.add_argument('--tag', type=str)
+    parser.add_argument('--params_folder', type=str)
+    parser.add_argument('--batch_folder', type=str)
+    parser.add_argument('--output_folder', type=str)
+    parser.add_argument('--script_path', type=str)
+    # NERSC arguments
+    parser.add_argument('--n_nodes', type=int, default=64)
+    parser.add_argument('--n_tasks', type=int, default=32)
+    parser.add_argument('--n_batch_scripts', type=int, default=100)
+    parser.add_argument('--time', type=str, default='00:30:00')
+    parser.add_argument('--qos', type=str, default='debug')
     # Fixed model hyperparameters
+    parser.add_argument('--model_fit', type=str, default='em')
     parser.add_argument('--N', type=int, default=10)
     parser.add_argument('--M', type=int, default=10)
     parser.add_argument('--K', type=int, default=1)
@@ -229,25 +230,6 @@ if __name__ == '__main__':
     parser.add_argument('--tuning_rng', type=int, default=-1)
     parser.add_argument('--dataset_rng', type=int, default=-1)
     parser.add_argument('--fitter_rng', type=int, default=-1)
-    args = parser.parse_args()
-
-    main(args)
-
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Run CV solver on triangular model.')
-    parser.add_argument('--exp_folder', type=str)
-    parser.add_argument('--tag', type=str)
-    parser.add_argument('--script_path', type=str)
-    parser.add_argument('--job_folder', type=str)
-    # NERSC options
-    parser.add_argument('--n_nodes', type=int, default=128)
-    parser.add_argument('--n_tasks', type=int, default=32)
-    parser.add_argument('--model_fit', default='em')
-    parser.add_argument('--time', default='00:30:00')
-    parser.add_argument('--qos', default='debug')
-    # Other options
-    parser.add_argument('--warn', action='store_true')
     args = parser.parse_args()
 
     main(args)
