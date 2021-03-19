@@ -140,6 +140,34 @@ def test_initialization():
     assert_allclose(LL, LL_hat)
 
 
+def test_mll_gradient():
+    """Tests that the gradient of the marginal log-likelihood is calculated
+    correctly."""
+    # Generate triangular model and data
+    K = 2
+    tm = TriangularModel(parameter_design='direct_response', N=8, M=9, K=K)
+    X, Y, y = tm.generate_samples(n_samples=1000)
+    # Create EMSolver object
+    solver = EMSolver(X, Y, y, K=K, initialization='zeros')
+    _, grad = solver.f_df_ml(
+        solver.get_params(), X, Y, y, K,
+        a_mask=solver.a_mask,
+        b_mask=solver.b_mask,
+        B_mask=solver.B_mask,
+        train_B=solver.train_B,
+        train_L_nt=solver.train_L_nt,
+        train_L=solver.train_L,
+        train_Psi_tr_nt=solver.train_Psi_tr_nt,
+        train_Psi_tr=solver.train_Psi_tr,
+        Psi_transform=solver.Psi_transform,
+        wrt_Psi=True)
+    # Gradient w.r.t to b
+    R = solver.get_residual_matrix()
+    sigma = solver.get_marginal_cov()
+    b_grad_true = (-np.linalg.solve(sigma, R.T) @ X)[0]
+    assert_allclose(grad[tm.N:tm.N+tm.M], b_grad_true)
+
+
 def test_hessian():
     """Tests that the Hessian is calculated correctly."""
     # Generate triangular model and data
