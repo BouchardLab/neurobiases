@@ -187,6 +187,12 @@ class EMSolver():
         else:
             self.B_mask = B_mask.reshape((self.M, self.N))
 
+    def reset_masks(self):
+        """Reset the masks according to the current parameter values."""
+        self.set_masks(a_mask=self.a.ravel() != 0,
+                       b_mask=self.b.ravel() != 0,
+                       B_mask=self.B != 0)
+
     def set_params(self, a=None, b=None, B=None, Psi_tr=None, L=None):
         """Sets parameters equal to the provided parameter values.
 
@@ -559,11 +565,15 @@ class EMSolver():
                               self.Psi_transform, wrt_Psi)
 
         hessian = torch.autograd.functional.hessian(mll, inputs=tparams)
-
-        if mask:
+        n_entries = hessian.shape[0]
+        if mask == 'L':
+            L_idx = np.arange(self.N + self.M + self.N * self.M + self.N + 1,
+                              n_entries)
+            L_idx = np.delete(L_idx, np.arange(0, L_idx.size, self.N + 1))
+            hessian = np.delete(np.delete(hessian, L_idx, axis=0), L_idx, axis=1)
+        elif mask:
             a_idx = np.argwhere(self.a_mask.ravel() == 0).ravel()
             b_idx = self.N + np.argwhere(self.b_mask.ravel() == 0).ravel()
-            n_entries = hessian.shape[0]
             L_idx = np.arange(self.N + self.M + self.N * self.M + self.N + 1,
                               n_entries)
             L_idx = np.delete(L_idx, np.arange(0, L_idx.size, self.N + 1))
@@ -1020,6 +1030,7 @@ class EMSolver():
         self.L[:, 0] = self.L[:, 0] + delta.ravel()
         self.a = self.a + Delta
         self.b = self.b - np.dot(self.B, Delta)
+        self.reset_masks()
 
     def apply_identifiability_constraint(
         self, constraint, a_mask=None, b_mask=None
@@ -1331,7 +1342,11 @@ class EMSolver():
         if wrt_Psi:
             a, b, B, Psi_tr, L = utils.split_tparams(params, N, M, K)
             Psi = utils.Psi_tr_to_Psi(Psi_tr, Psi_transform)
-            params = np.concatenate((a.ravel(), b.ravel(), B.ravel(), Psi.ravel(), L.ravel()))
+            params = np.concatenate((a.ravel(),
+                                     b.ravel(),
+                                     B.ravel(),
+                                     Psi.ravel(),
+                                     L.ravel()))
 
         # Turn parameters into torch tensors
         tparams = torch.tensor(params, requires_grad=True)
@@ -1407,7 +1422,7 @@ class EMSolver():
     def f_df_em(params, X, Y, y, a_mask, b_mask, B_mask, train_B, train_L_nt,
                 train_L, train_Psi_tr_nt, train_Psi_tr, mu, zz, sigma,
                 tuning_to_coupling_ratio, penalize_B=False, Psi_transform='softplus',
-                storage=None):
+                wrt_Psi=False, storage=None):
         """Helper function for the M-step in the EM procedure. Calculates the
         expected complete log-likelihood and gradients with respect to all
         parameters.
@@ -1455,19 +1470,33 @@ class EMSolver():
             variables whose training flag was set to False will have corresponding
             gradients set equal to zero.
         """
-        # extract dimensions
+        # Extract dimensions
         D, M = X.shape
         N = Y.shape[1]
         K = mu.shape[1]
-        # turn parameters into torch tensors
+
+        # Option to take derivative w.r.t Psi rather than Psi_tr
+        if wrt_Psi:
+            a, b, B, Psi_tr, L = utils.split_tparams(params, N, M, K)
+            Psi = utils.Psi_tr_to_Psi(Psi_tr, Psi_transform)
+            params = np.concatenate((a.ravel(),
+                                     b.ravel(),
+                                     B.ravel(),
+                                     Psi.ravel(),
+                                     L.ravel()))
+
+        # Turn parameters into torch tensors
         tparams = torch.tensor(params, requires_grad=True)
         a, b, B, Psi_tr, L = utils.split_tparams(tparams, N, M, K)
         # apply rescaling
         b = b / tuning_to_coupling_ratio
         if penalize_B:
             B = B / tuning_to_coupling_ratio
-        # split up terms into target/non-target components
-        Psi = utils.Psi_tr_to_Psi(Psi_tr, Psi_transform)
+        # Split up terms into target/non-target components
+        if wrt_Psi:
+            Psi = Psi_tr
+        else:
+            Psi = utils.Psi_tr_to_Psi(Psi_tr, Psi_transform)
         Psi_nt = Psi[1:]
         l_t = L[:, 0].reshape(K, 1)
         L_nt = L[:, 1:]

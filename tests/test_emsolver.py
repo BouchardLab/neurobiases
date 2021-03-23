@@ -140,6 +140,58 @@ def test_initialization():
     assert_allclose(LL, LL_hat)
 
 
+def test_ecll_gradient():
+    """Tests that the gradient of the expected complete log-likelihood is
+    calculated correctly."""
+    # Generate triangular model and data
+    K = 2
+    tm = TriangularModel(parameter_design='direct_response', N=8, M=9, K=K)
+    X, Y, y = tm.generate_samples(n_samples=1000)
+    # Create EMSolver object
+    solver = EMSolver(X, Y, y, K=K, initialization='zeros')
+    # Calculate ECLL
+    mu, zz, sigma = solver.e_step()
+    _, grad = solver.f_df_em(
+        solver.get_params(),
+        X, Y, y,
+        a_mask=solver.a_mask,
+        b_mask=solver.b_mask,
+        B_mask=solver.B_mask,
+        train_B=solver.train_B,
+        train_L_nt=solver.train_L_nt,
+        train_L=solver.train_L,
+        train_Psi_tr_nt=solver.train_Psi_tr_nt,
+        train_Psi_tr=solver.train_Psi_tr,
+        Psi_transform=solver.Psi_transform,
+        mu=mu, zz=zz, sigma=sigma,
+        tuning_to_coupling_ratio=1,
+        penalize_B=False,
+        wrt_Psi=True)
+    a_grad, b_grad, B_grad, Psi_grad, L_grad = solver.split_params(grad)
+    # Extract useful quantities for gradients
+    Psi = solver.Psi_tr_to_Psi()
+    Psi_t = Psi[0]
+    y_residual = y - X @ solver.b - Y @ solver.a
+    muL = (mu @ solver.L[:, 0])[..., np.newaxis]
+    # Coupling parameters gradient
+    a_grad = a_grad.ravel()
+    a_grad_true = -2 * np.mean(Y * (y_residual - muL), axis=0) / Psi_t
+    assert_allclose(a_grad_true, a_grad)
+    # Tuning parameters gradient
+    b_grad = b_grad.ravel()
+    b_grad_true = -2 * np.mean(X * (y_residual - muL), axis=0) / Psi_t
+    assert_allclose(b_grad_true, b_grad)
+    # Non-target tuning parameters
+    # Private variance, target neuron
+    Psi_t_grad = Psi_grad[0]
+    Psi_t_grad_true = \
+        1. / Psi_t \
+        - np.mean(y_residual**2) / Psi_t**2 \
+        + (2 / Psi_t**2) * np.mean(y_residual * muL) \
+        - (1 / Psi_t**2) * np.mean((zz @ solver.L[:, 0]) @ solver.L[:, 0])
+    assert_allclose(Psi_t_grad_true, Psi_t_grad)
+
+
 def test_mll_gradient():
     """Tests that the gradient of the marginal log-likelihood is calculated
     correctly."""
