@@ -171,25 +171,71 @@ def test_ecll_gradient():
     # Extract useful quantities for gradients
     Psi = solver.Psi_tr_to_Psi()
     Psi_t = Psi[0]
+    Psi_nt = Psi[1:]
+    l_t = solver.L[:, 0][..., np.newaxis]
+    L_nt = solver.L[:, 1:]
     y_residual = y - X @ solver.b - Y @ solver.a
-    muL = (mu @ solver.L[:, 0])[..., np.newaxis]
+    Y_residual = Y - X @ solver.B
+    mu_Lt = (mu @ solver.L[:, 0])[..., np.newaxis]
+    mu_Lnt = mu @ solver.L[:, 1:]
     # Coupling parameters gradient
     a_grad = a_grad.ravel()
-    a_grad_true = -2 * np.mean(Y * (y_residual - muL), axis=0) / Psi_t
+    a_grad_true = -2 * np.mean(Y * (y_residual - mu_Lt), axis=0) / Psi_t
     assert_allclose(a_grad_true, a_grad)
     # Tuning parameters gradient
     b_grad = b_grad.ravel()
-    b_grad_true = -2 * np.mean(X * (y_residual - muL), axis=0) / Psi_t
+    b_grad_true = -2 * np.mean(X * (y_residual - mu_Lt), axis=0) / Psi_t
     assert_allclose(b_grad_true, b_grad)
     # Non-target tuning parameters
+    B_grad_true = \
+        - 2 * np.mean(
+            np.matmul(np.expand_dims(X, 2),
+                      np.expand_dims(Y_residual, 1)),
+            axis=0
+        ) / Psi_nt \
+        + 2 * np.mean(
+            np.matmul(np.expand_dims(X, 2),
+                      np.expand_dims(mu_Lnt, 1)),
+            axis=0
+        ) / Psi_nt
+    assert_allclose(B_grad_true, B_grad)
+    # Target latent factors
+    l_t_grad = L_grad[:, 0].ravel()
+    l_t_grad_true = \
+        - 2 * np.mean(y_residual * mu, axis=0) / Psi_t \
+        + 2 * np.mean(zz @ l_t, axis=0).squeeze() / Psi_t
+    assert_allclose(l_t_grad_true, l_t_grad)
+    # Non-target latent factors
+    L_nt_grad = L_grad[:, 1:].ravel()
+    L_nt_grad_true = \
+        - 2 * np.mean(
+            np.matmul(np.expand_dims(mu, 2),
+                      np.expand_dims(Y_residual, 1)),
+            axis=0
+        ) / Psi_nt \
+        + 2 * (sigma @ L_nt) / Psi_nt \
+        + 2 * np.mean((np.matmul(
+            np.expand_dims(mu, 2),
+            np.expand_dims(mu, 1)
+        ) @ L_nt), axis=0) / Psi_nt
+    assert_allclose(L_nt_grad_true.ravel(), L_nt_grad)
     # Private variance, target neuron
     Psi_t_grad = Psi_grad[0]
     Psi_t_grad_true = \
         1. / Psi_t \
         - np.mean(y_residual**2) / Psi_t**2 \
-        + (2 / Psi_t**2) * np.mean(y_residual * muL) \
-        - (1 / Psi_t**2) * np.mean((zz @ solver.L[:, 0]) @ solver.L[:, 0])
+        + (2 / Psi_t**2) * np.mean(y_residual * mu_Lt) \
+        - (1 / Psi_t**2) * np.mean((zz @ l_t).squeeze() @ l_t)
     assert_allclose(Psi_t_grad_true, Psi_t_grad)
+    # Private variance, non-target neurons
+    Psi_nt_grad = Psi_grad[1:]
+    Psi_nt_grad_true = \
+        1. / Psi_nt \
+        - np.mean(Y_residual**2, axis=0) / Psi_nt**2 \
+        + 2 * np.mean(Y_residual * mu_Lnt, axis=0) / Psi_nt**2 \
+        - np.diag(L_nt.T @ sigma @ L_nt) / Psi_nt**2 \
+        - np.mean(mu_Lnt**2, axis=0) / Psi_nt**2
+    assert_allclose(Psi_nt_grad_true, Psi_nt_grad)
 
 
 def test_mll_gradient():
