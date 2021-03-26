@@ -149,7 +149,7 @@ def main(args):
                     command = (
                         f"srun -n {n_tasks} -c $OMP_NUM_THREADS shifter python "
                         f"{script_path} --file_path={save_path} "
-                        f"--model_fit={model_fit}\n"
+                        f"--model_fit={model_fit} &\n"
                     )
 
                     # If we have reset the job counter, create a new batch script
@@ -158,12 +158,11 @@ def main(args):
                         batch_path = f"{batch_folder}/{tag}_{batch_counter}.sh"
                         batch_counter += 1
 
-                    batch_script += "echo '================================='\n"
-                    batch_script += f"echo 'Job {job_counter + 1}/{n_jobs_per_batch}'\n"
-                    batch_script += "echo '================================='\n"
+                    job_counter += 1
+                    if job_counter % args.n_simultaneous == 0:
+                        command += "wait\n"
                     batch_script += command
 
-                    job_counter += 1
                     # If we're at the last counter, write file
                     if job_counter == n_jobs_per_batch:
                         with open(batch_path, 'w') as batch:
@@ -184,6 +183,7 @@ if __name__ == '__main__':
     parser.add_argument('--n_nodes', type=int, default=64)
     parser.add_argument('--n_tasks', type=int, default=32)
     parser.add_argument('--n_batch_scripts', type=int, default=100)
+    parser.add_argument('--n_simultaneous', type=int, default=50)
     parser.add_argument('--time', type=str, default='00:30:00')
     parser.add_argument('--qos', type=str, default='debug')
     # Fixed model hyperparameters
