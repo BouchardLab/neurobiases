@@ -148,7 +148,7 @@ def main(args):
                         params.attrs['tol'] = args.tol
                     # Create SBATCH command
                     command = (
-                        f"srun -N {n_nodes_per_job} -n {n_tasks}"
+                        f"srun -N {n_nodes_per_job} -n {n_tasks} "
                         "-c $OMP_NUM_THREADS shifter python "
                         f"{script_path} --file_path={save_path} "
                         f"--model_fit={model_fit} &\n"
