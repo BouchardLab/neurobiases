@@ -18,6 +18,7 @@ def main(args):
     # NERSC parameters
     n_nodes = args.n_nodes
     n_tasks = args.n_tasks
+    n_nodes_per_job = int(n_tasks / 32)
     n_batch_scripts = args.n_batch_scripts
     time = args.time
     qos = args.qos
@@ -147,7 +148,8 @@ def main(args):
                         params.attrs['tol'] = args.tol
                     # Create SBATCH command
                     command = (
-                        f"srun -n {n_tasks} -c $OMP_NUM_THREADS shifter python "
+                        f"srun -N {n_nodes_per_job} -n {n_tasks}"
+                        "-c $OMP_NUM_THREADS shifter python "
                         f"{script_path} --file_path={save_path} "
                         f"--model_fit={model_fit} &\n"
                     )
