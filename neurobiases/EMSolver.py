@@ -673,6 +673,9 @@ class EMSolver():
             else:
                 callback = None
             if index:
+                M = self.M
+                N = self.N
+                K = self.K
                 all_mask = np.ones(params.size, dtype=bool)
                 all_mask[:N] = self.a_mask.ravel()
                 all_mask[N:(N + M)] = self.b_mask.ravel()
@@ -692,8 +695,8 @@ class EMSolver():
                     all_mask[(N + M + N * M + N + 1):] *= mask
                 if not self.train_L:
                     all_mask[(N + M + N * M + N + 1):] = 0
-                all_mask = np.nonzero(all_mask)
-                params = params[all_mask]
+                index = np.nonzero(all_mask)
+                params = params[index]
             optimize = minimize(
                 self.f_df_em, x0=params,
                 method='L-BFGS-B',
@@ -708,11 +711,17 @@ class EMSolver():
                       1.,
                       self.penalize_B,
                       self.Psi_transform,
+                      False,
+                      store_parameters,
                       index),
                 callback=callback,
                 jac=True)
             # extract optimized parameters
-            params = optimize.x
+            if isinstance(index, tuple):
+                params = np.zeros(all_mask.size)
+                params[index] = optimize.x
+            else:
+                params = optimize.x
 
         # Use orthant-wise lbfgs solver (for sparse situations)
         elif self.solver == 'ow_lbfgs':
@@ -1500,31 +1509,32 @@ class EMSolver():
         D, M = X.shape
         N = Y.shape[1]
         K = mu.shape[1]
-        size = a.size +  b.size + B.size + Psi_tr.size + L.size
+        size = N + M + N * M + N + 1 + K * (N + 1)
 
-        if index:
-            all_mask = np.ones(size, dtype=bool)
-            all_mask[:N] = a_mask.ravel()
-            all_mask[N:(N + M)] = b_mask.ravel()
-            # if we're training non-target tuning parameters, apply selection mask
-            if train_B:
-                all_mask[(N + M):(N + M + N * M)] *= B_mask.ravel()
-            else:
-                all_mask[(N + M):(N + M + N * M)] = 0
-            # mask out gradients for parameters not being trained
-            if not train_Psi_tr_nt:
-                all_mask[(N + M + N * M + 1):(N + M + N * M + N + 1)] = 0
-            if not train_Psi_tr:
-                all_mask[(N + M + N * M):(N + M + N * M + N + 1)] = 0
-            if not train_L_nt:
-                mask = np.zeros(grad[(N + M + N * M + N + 1):].size)
-                mask[0::(N + 1)] = np.ones(K)
-                all_mask[(N + M + N * M + N + 1):] *= mask
-            if not train_L:
-                all_mask[(N + M + N * M + N + 1):] = 0
-            all_mask = np.nonzero(all_mask)
+        if isinstance(index, tuple) or index:
+            if not isinstance(index, tuple):
+                all_mask = np.ones(size, dtype=bool)
+                all_mask[:N] = a_mask.ravel()
+                all_mask[N:(N + M)] = b_mask.ravel()
+                # if we're training non-target tuning parameters, apply selection mask
+                if train_B:
+                    all_mask[(N + M):(N + M + N * M)] = B_mask.ravel()
+                else:
+                    all_mask[(N + M):(N + M + N * M)] = 0
+                # mask out gradients for parameters not being trained
+                if not train_Psi_tr_nt:
+                    all_mask[(N + M + N * M + 1):(N + M + N * M + N + 1)] = 0
+                if not train_Psi_tr:
+                    all_mask[(N + M + N * M):(N + M + N * M + N + 1)] = 0
+                if not train_L_nt:
+                    mask = np.zeros(grad[(N + M + N * M + N + 1):].size, dtype=bool)
+                    mask[0::(N + 1)] = np.ones(K, dtype=bool)
+                    all_mask[(N + M + N * M + N + 1):] = mask
+                if not train_L:
+                    all_mask[(N + M + N * M + N + 1):] = 0
+                index = np.nonzero(all_mask)
             all_params = np.zeros(size, dtype=params.dtype)
-            all_params[all_mask] = params
+            all_params[index] = params
             params = all_params
 
         # Option to take derivative w.r.t Psi rather than Psi_tr
@@ -1584,8 +1594,8 @@ class EMSolver():
         grad = tparams.grad.detach().numpy()
 
         # apply masks to the gradient
-        if index:
-            grad = grad[all_mask]
+        if isinstance(index, tuple):
+            grad = grad[index]
         else:
             grad[:N] *= a_mask.ravel()
             grad[N:(N + M)] *= b_mask.ravel()
