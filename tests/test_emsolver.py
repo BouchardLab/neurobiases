@@ -238,6 +238,88 @@ def test_ecll_gradient():
     assert_allclose(Psi_nt_grad_true, Psi_nt_grad)
 
 
+def test_ecll_gradient_index():
+    """Tests that the gradient of the expected complete log-likelihood is
+    calculated correctly."""
+    # Generate triangular model and data
+    K = 2
+    tm = TriangularModel(parameter_design='direct_response', N=8, M=9, K=K,
+                         tuning_sparsity=.5, coupling_sparsity=.5)
+    a_mask = tm.a.ravel() != 0
+    b_mask = tm.b.ravel() != 0
+    X, Y, y = tm.generate_samples(n_samples=1000)
+    # Create EMSolver object
+    solver = EMSolver(X, Y, y, K=K, initialization='zeros')
+    params = solver.get_params()
+    M = solver.M
+    N = solver.N
+    K = solver.K
+    grad_mask = np.ones(params.size, dtype=bool)
+    grad_mask[:N] = a_mask
+    grad_mask[N:(N + M)] = b_mask
+    index = np.nonzero(grad_mask)
+    all_params = params.copy()
+    params = params[index]
+    mu, zz, sigma = solver.e_step()
+
+    f, grad = solver.f_df_em(
+        all_params.copy(),
+        X, Y, y,
+        a_mask=tm.a.ravel() != 0,
+        b_mask=tm.b.ravel() != 0,
+        B_mask=solver.B_mask,
+        train_B=solver.train_B,
+        train_L_nt=solver.train_L_nt,
+        train_L=solver.train_L,
+        train_Psi_tr_nt=solver.train_Psi_tr_nt,
+        train_Psi_tr=solver.train_Psi_tr,
+        mu=mu, zz=zz, sigma=sigma,
+        tuning_to_coupling_ratio=1,
+        index=False)
+
+    f1, grad1 = solver.f_df_em(
+        params.copy(),
+        X, Y, y,
+        a_mask=tm.a.ravel() != 0,
+        b_mask=tm.b.ravel() != 0,
+        B_mask=solver.B_mask,
+        train_B=solver.train_B,
+        train_L_nt=solver.train_L_nt,
+        train_L=solver.train_L,
+        train_Psi_tr_nt=solver.train_Psi_tr_nt,
+        train_Psi_tr=solver.train_Psi_tr,
+        mu=mu, zz=zz, sigma=sigma,
+        tuning_to_coupling_ratio=1,
+        index=True,
+        all_params=all_params)
+    tmp = np.zeros_like(grad)
+    tmp[index] = grad1
+    grad1 = tmp
+    assert_allclose(f, f1)
+    assert_allclose(grad, grad1)
+
+    f2, grad2 = solver.f_df_em(
+        params.copy(),
+        X, Y, y,
+        a_mask=tm.a.ravel() != 0,
+        b_mask=tm.b.ravel() != 0,
+        B_mask=solver.B_mask,
+        train_B=solver.train_B,
+        train_L_nt=solver.train_L_nt,
+        train_L=solver.train_L,
+        train_Psi_tr_nt=solver.train_Psi_tr_nt,
+        train_Psi_tr=solver.train_Psi_tr,
+        mu=mu, zz=zz, sigma=sigma,
+        tuning_to_coupling_ratio=1,
+        index=index,
+        all_params=all_params)
+    tmp = np.zeros_like(grad)
+    tmp[index] = grad2
+    grad2 = tmp
+    assert_allclose(f, f2)
+    assert_allclose(grad, grad2)
+
+
 def test_mll_gradient():
     """Tests that the gradient of the marginal log-likelihood is calculated
     correctly."""
