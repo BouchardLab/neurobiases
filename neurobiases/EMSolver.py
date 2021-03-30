@@ -626,7 +626,7 @@ class EMSolver():
         return mu, zz, sigma
 
     def m_step(self, mu, zz, sigma, verbose=False, fista_max_iter=250,
-               fista_lr=1e-6, store_parameters=False, index=False):
+               fista_lr=1e-6, store_parameters=False, index=True):
         """Performs an M-step in the EM algorithm for the triangular model.
 
         Parameters
@@ -906,7 +906,7 @@ class EMSolver():
 
     def fit_em(
         self, refit=False, verbose=False, mstep_verbose=False, mll_curve=False,
-        fista_max_iter=250, fista_lr=1e-6, store_parameters=False, index=False
+        fista_max_iter=250, fista_lr=1e-6, store_parameters=False, index=True
     ):
         """Fit the triangular model parameters using the EM algorithm.
 
@@ -1530,12 +1530,12 @@ class EMSolver():
                 if not train_Psi_tr:
                     grad_mask[(N + M + N * M):(N + M + N * M + N + 1)] = 0
                 if not train_L_nt:
-                    mask = np.zeros(grad[(N + M + N * M + N + 1):].size, dtype=bool)
+                    mask = np.zeros(all_params[(N + M + N * M + N + 1):].size, dtype=bool)
                     mask[0::(N + 1)] = np.ones(K, dtype=bool)
                     grad_mask[(N + M + N * M + N + 1):] = mask
                 if not train_L:
                     grad_mask[(N + M + N * M + N + 1):] = 0
-                index = np.nonzero(all_mask)
+                index = np.nonzero(grad_mask)
             all_params = all_params.copy()
             all_params[index] = params
             params = all_params
