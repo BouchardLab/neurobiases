@@ -257,3 +257,62 @@ def fista(f_df, params, lr, C0=0., C1=0., zero_start=-1, zero_end=-1,
         string = 'M step stopped on iteration {} of {} with loss {} and initial loss {}.'
         print(string.format(ii+1, max_iter, losst, losso))
     return yt
+
+
+def grad_mask(N, M, K, a_mask, b_mask, B_mask, train_B, train_Psi_tr_nt,
+              train_Psi_tr, train_L_nt, train_L):
+    """Creats a binary mask for optimization.
+
+    Parameters
+    ----------
+    N : int
+        Data dimensionality.
+    M : int
+        Stimulus dimensionality.
+    K : int
+        Latent dimensionality.
+    a_mask : np.ndarray, shape (N, 1)
+        Mask for coupling features.
+    b_mask : nd-array, shape (M, 1)
+        Mask for tuning features.
+    B_mask : nd-array, shape (N, M)
+        Mask for non-target neuron tuning features.
+    train_B : bool
+        If True, non-target tuning parameters will be trained.
+    train_L_nt : bool
+        If True, non-target latent factors will be trained.
+    train_L : bool
+        If True, latent factors will be trained. Takes precedence over
+        train_L_nt.
+    train_Psi_tr_nt : bool
+        If True, non-target private variances will be trained.
+    train_Psi_tr : bool
+        If True, private variances will be trained. Takes precedence over
+        train_Psi_tr_nt.
+
+    Returns
+    -------
+    grad_mask : ndarray
+        Binary mask for the gradient.
+    """
+    size = N + M + N * M + N + 1 + K * (N + 1)
+    grad_mask = np.ones(size, dtype=bool)
+    grad_mask[:N] = a_mask.ravel()
+    grad_mask[N:(N + M)] = b_mask.ravel()
+    # if we're training non-target tuning parameters, apply selection mask
+    if train_B:
+        grad_mask[(N + M):(N + M + N * M)] = B_mask.ravel()
+    else:
+        grad_mask[(N + M):(N + M + N * M)] = 0
+    # mask out gradients for parameters not being trained
+    if not train_Psi_tr_nt:
+        grad_mask[(N + M + N * M + 1):(N + M + N * M + N + 1)] = 0
+    if not train_Psi_tr:
+        grad_mask[(N + M + N * M):(N + M + N * M + N + 1)] = 0
+    if not train_L_nt:
+        mask = np.zeros(K * (N + 1), dtype=bool)
+        mask[0::(N + 1)] = 1
+        grad_mask[(N + M + N * M + N + 1):] = mask
+    if not train_L:
+        grad_mask[(N + M + N * M + N + 1):] = 0
+    return grad_mask

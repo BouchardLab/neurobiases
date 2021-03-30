@@ -677,25 +677,15 @@ class EMSolver():
                 M = self.M
                 N = self.N
                 K = self.K
-                grad_mask = np.ones(params.size, dtype=bool)
-                grad_mask[:N] = self.a_mask.ravel()
-                grad_mask[N:(N + M)] = self.b_mask.ravel()
-                # if we're training non-target tuning parameters, apply selection mask
-                if self.train_B:
-                    grad_mask[(N + M):(N + M + N * M)] = self.B_mask.ravel()
-                else:
-                    grad_mask[(N + M):(N + M + N * M)] = 0
-                # mask out gradients for parameters not being trained
-                if not self.train_Psi_tr_nt:
-                    grad_mask[(N + M + N * M + 1):(N + M + N * M + N + 1)] = 0
-                if not self.train_Psi_tr:
-                    grad_mask[(N + M + N * M):(N + M + N * M + N + 1)] = 0
-                if not self.train_L_nt:
-                    mask = np.zeros(grad[(N + M + N * M + N + 1):].size)
-                    mask[0::(N + 1)] = np.ones(K)
-                    grad_mask[(N + M + N * M + N + 1):] *= mask
-                if not self.train_L:
-                    grad_mask[(N + M + N * M + N + 1):] = 0
+                grad_mask = utils.grad_mask(N, M, K,
+                                            self.a_mask.ravel(),
+                                            self.b_mask.ravel(),
+                                            self.B_mask.ravel(),
+                                            self.train_B,
+                                            self.train_Psi_tr_nt,
+                                            self.train_Psi_tr,
+                                            self.train_L_nt,
+                                            self.train_L)
                 index = np.nonzero(grad_mask)
                 all_params = params.copy()
                 params = params[index]
@@ -1512,29 +1502,18 @@ class EMSolver():
         D, M = X.shape
         N = Y.shape[1]
         K = mu.shape[1]
-        size = N + M + N * M + N + 1 + K * (N + 1)
 
         if isinstance(index, tuple) or index:
             if not isinstance(index, tuple):
-                grad_mask = np.ones(size, dtype=bool)
-                grad_mask[:N] = a_mask.ravel()
-                grad_mask[N:(N + M)] = b_mask.ravel()
-                # if we're training non-target tuning parameters, apply selection mask
-                if train_B:
-                    grad_mask[(N + M):(N + M + N * M)] = B_mask.ravel()
-                else:
-                    grad_mask[(N + M):(N + M + N * M)] = 0
-                # mask out gradients for parameters not being trained
-                if not train_Psi_tr_nt:
-                    grad_mask[(N + M + N * M + 1):(N + M + N * M + N + 1)] = 0
-                if not train_Psi_tr:
-                    grad_mask[(N + M + N * M):(N + M + N * M + N + 1)] = 0
-                if not train_L_nt:
-                    mask = np.zeros(all_params[(N + M + N * M + N + 1):].size, dtype=bool)
-                    mask[0::(N + 1)] = np.ones(K, dtype=bool)
-                    grad_mask[(N + M + N * M + N + 1):] = mask
-                if not train_L:
-                    grad_mask[(N + M + N * M + N + 1):] = 0
+                grad_mask = utils.grad_mask(N, M, K,
+                                            a_mask.ravel(),
+                                            b_mask.ravel(),
+                                            B_mask.ravel(),
+                                            train_B,
+                                            train_Psi_tr_nt,
+                                            train_Psi_tr,
+                                            train_L_nt,
+                                            train_L)
                 index = np.nonzero(grad_mask)
             all_params = all_params.copy()
             all_params[index] = params
