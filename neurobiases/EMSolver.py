@@ -48,23 +48,23 @@ class EMSolver():
     """
     def __init__(
         self, X, Y, y, K, a_mask=None, b_mask=None, B_mask=None,
-        B=None, L_nt=None, L=None, Psi_nt=None, Psi=None, Psi_transform='softplus',
-        solver='scipy_lbfgs', max_iter=1000, tol=1e-4, c_tuning=0., c_coupling=0.,
+        B=None, L_nt=None, L=None, Psi_nt=None, Psi=None,
+        Psi_transform='softplus', center=False, solver='scipy_lbfgs',
+        max_iter=1000, tol=1e-4, c_tuning=0., c_coupling=0.,
         penalize_B=False, initialization='zeros', rng=None, fa_rng=None
     ):
-        # tuning and coupling design matrices
+        # Data: stimulus and neural activities
         self.X = X
         self.Y = Y
-        # response vector
         self.y = y
-        # number of latent factors
-        self.K = K
 
-        # dataset dimensions
+        # Model and dataset dimensions
+        self.K = K
         self.D, self.M = self.X.shape
         self.N = self.Y.shape[1]
 
-        # optimization parameters
+        # Optimization parameters
+        self.center = center
         self.Psi_transform = Psi_transform
         self.solver = solver
         self.max_iter = max_iter
@@ -78,14 +78,14 @@ class EMSolver():
         self.penalize_B = penalize_B
         self.rng = np.random.default_rng(rng)
         self.fa_rng = fa_rng
-        # initialize masks
+        # Initialize masks
         self.set_masks(a_mask=a_mask, b_mask=b_mask, B_mask=B_mask)
-        # initialize parameter estimates
+        # Initialize parameter estimates
         self.initialization = initialization
         self._init_params(initialization)
-        # initialize non-target tuning parameters
+        # Initialize non-target tuning parameters
         self.freeze_B(B=B)
-        # initialize variability parameters
+        # Initialize variability parameters
         self.freeze_var_params(L_nt=L_nt, L=L, Psi_nt=Psi_nt, Psi=Psi)
 
     def _init_params(self, initialization='zeros'):
@@ -916,6 +916,20 @@ class EMSolver():
             An array containing the marginal log-likelihood of the model fit
             at each EM iteration.
         """
+        # Center the data before fitting, if necessary
+        if self.center:
+            # Store original datasets separately
+            self.X_orig = np.copy(self.X)
+            self.Y_orig = np.copy(self.Y)
+            self.y_orig = np.copy(self.y)
+            # Obtain means
+            self.X_mean = np.mean(self.X, axis=0, keepdims=True)
+            self.X = self.X - self.X_mean
+            self.Y_mean = np.mean(self.Y, axis=0, keepdims=True)
+            self.Y = self.Y - self.Y_mean
+            self.y_mean = np.mean(self.y, axis=0, keepdims=True)
+            self.y = self.y - self.y_mean
+
         # initialize iteration count and change in likelihood
         iteration = 0
         del_ml = np.inf
@@ -970,8 +984,17 @@ class EMSolver():
                     f'Iteration {iteration}: '
                     f'del={del_ml:0.5E}, '
                     f'mll={mlls[iteration]:0.7E}')
-        self.n_iterations = iteration + 1
 
+        # Restore data if centered, and obtain intercepts
+        if self.center:
+            self.b_nt_intercept = self.Y_mean - self.X_mean @ self.b
+            self.b_t_intercept = (self.y_mean
+                                  - self.X_mean @ self.b
+                                  - self.Y_mean @ self.a).item()
+            self.X = np.copy(self.X_orig)
+            self.Y = np.copy(self.Y_orig)
+            self.y = np.copy(self.y_orig)
+        self.n_iterations = iteration + 1
         if store_parameters:
             self.steps = np.array(steps)
             self.ll_path = np.concatenate(ll_path, axis=0)
