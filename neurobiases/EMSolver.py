@@ -626,7 +626,7 @@ class EMSolver():
         return mu, zz, sigma
 
     def m_step(self, mu, zz, sigma, verbose=False, fista_max_iter=250,
-               fista_lr=1e-6, store_parameters=False):
+               fista_lr=1e-6, store_parameters=False, index=False):
         """Performs an M-step in the EM algorithm for the triangular model.
 
         Parameters
@@ -672,6 +672,28 @@ class EMSolver():
                     )
             else:
                 callback = None
+            if index:
+                all_mask = np.ones(params.size, dtype=bool)
+                all_mask[:N] = self.a_mask.ravel()
+                all_mask[N:(N + M)] = self.b_mask.ravel()
+                # if we're training non-target tuning parameters, apply selection mask
+                if self.train_B:
+                    all_mask[(N + M):(N + M + N * M)] = self.B_mask.ravel()
+                else:
+                    all_mask[(N + M):(N + M + N * M)] = 0
+                # mask out gradients for parameters not being trained
+                if not self.train_Psi_tr_nt:
+                    all_mask[(N + M + N * M + 1):(N + M + N * M + N + 1)] = 0
+                if not self.train_Psi_tr:
+                    all_mask[(N + M + N * M):(N + M + N * M + N + 1)] = 0
+                if not self.train_L_nt:
+                    mask = np.zeros(grad[(N + M + N * M + N + 1):].size)
+                    mask[0::(N + 1)] = np.ones(K)
+                    all_mask[(N + M + N * M + N + 1):] *= mask
+                if not self.train_L:
+                    all_mask[(N + M + N * M + N + 1):] = 0
+                all_mask = np.nonzero(all_mask)
+                params = params[all_mask]
             optimize = minimize(
                 self.f_df_em, x0=params,
                 method='L-BFGS-B',
@@ -685,7 +707,8 @@ class EMSolver():
                       mu, zz, sigma,
                       1.,
                       self.penalize_B,
-                      self.Psi_transform),
+                      self.Psi_transform,
+                      index),
                 callback=callback,
                 jac=True)
             # extract optimized parameters
@@ -693,6 +716,8 @@ class EMSolver():
 
         # Use orthant-wise lbfgs solver (for sparse situations)
         elif self.solver == 'ow_lbfgs':
+            if index:
+                raise ValueError('`index` cannot be used with sparse solvers.')
             # create callable for owlbfgs
             if store_parameters:
                 def progress(x, g, fx, xnorm, gnorm, step, k, num_eval, *args):
@@ -869,7 +894,7 @@ class EMSolver():
 
     def fit_em(
         self, refit=False, verbose=False, mstep_verbose=False, mll_curve=False,
-        fista_max_iter=250, fista_lr=1e-6, store_parameters=False
+        fista_max_iter=250, fista_lr=1e-6, store_parameters=False, index=False
     ):
         """Fit the triangular model parameters using the EM algorithm.
 
@@ -919,7 +944,8 @@ class EMSolver():
                 verbose=mstep_verbose,
                 fista_max_iter=fista_max_iter,
                 fista_lr=fista_lr,
-                store_parameters=store_parameters)
+                store_parameters=store_parameters,
+                index=index)
             if store_parameters:
                 n_steps = np.sum(storage['n_iterations'])
                 steps.append(n_steps)
@@ -1422,7 +1448,7 @@ class EMSolver():
     def f_df_em(params, X, Y, y, a_mask, b_mask, B_mask, train_B, train_L_nt,
                 train_L, train_Psi_tr_nt, train_Psi_tr, mu, zz, sigma,
                 tuning_to_coupling_ratio, penalize_B=False, Psi_transform='softplus',
-                wrt_Psi=False, storage=None):
+                wrt_Psi=False, storage=None, index=False):
         """Helper function for the M-step in the EM procedure. Calculates the
         expected complete log-likelihood and gradients with respect to all
         parameters.
@@ -1474,6 +1500,32 @@ class EMSolver():
         D, M = X.shape
         N = Y.shape[1]
         K = mu.shape[1]
+        size = a.size +  b.size + B.size + Psi_tr.size + L.size
+
+        if index:
+            all_mask = np.ones(size, dtype=bool)
+            all_mask[:N] = a_mask.ravel()
+            all_mask[N:(N + M)] = b_mask.ravel()
+            # if we're training non-target tuning parameters, apply selection mask
+            if train_B:
+                all_mask[(N + M):(N + M + N * M)] *= B_mask.ravel()
+            else:
+                all_mask[(N + M):(N + M + N * M)] = 0
+            # mask out gradients for parameters not being trained
+            if not train_Psi_tr_nt:
+                all_mask[(N + M + N * M + 1):(N + M + N * M + N + 1)] = 0
+            if not train_Psi_tr:
+                all_mask[(N + M + N * M):(N + M + N * M + N + 1)] = 0
+            if not train_L_nt:
+                mask = np.zeros(grad[(N + M + N * M + N + 1):].size)
+                mask[0::(N + 1)] = np.ones(K)
+                all_mask[(N + M + N * M + N + 1):] *= mask
+            if not train_L:
+                all_mask[(N + M + N * M + N + 1):] = 0
+            all_mask = np.nonzero(all_mask)
+            all_params = np.zeros(size, dtype=params.dtype)
+            all_params[all_mask] = params
+            params = all_params
 
         # Option to take derivative w.r.t Psi rather than Psi_tr
         if wrt_Psi:
@@ -1532,26 +1584,29 @@ class EMSolver():
         grad = tparams.grad.detach().numpy()
 
         # apply masks to the gradient
-        grad[:N] *= a_mask.ravel()
-        grad[N:(N + M)] *= b_mask.ravel()
-
-        # if we're training non-target tuning parameters, apply selection mask
-        if train_B:
-            grad[(N + M):(N + M + N * M)] *= B_mask.ravel()
+        if index:
+            grad = grad[all_mask]
         else:
-            grad[(N + M):(N + M + N * M)] = 0
+            grad[:N] *= a_mask.ravel()
+            grad[N:(N + M)] *= b_mask.ravel()
 
-        # mask out gradients for parameters not being trained
-        if not train_Psi_tr_nt:
-            grad[(N + M + N * M + 1):(N + M + N * M + N + 1)] = 0
-        if not train_Psi_tr:
-            grad[(N + M + N * M):(N + M + N * M + N + 1)] = 0
-        if not train_L_nt:
-            mask = np.zeros(grad[(N + M + N * M + N + 1):].size)
-            mask[0::(N + 1)] = np.ones(K)
-            grad[(N + M + N * M + N + 1):] *= mask
-        if not train_L:
-            grad[(N + M + N * M + N + 1):] = 0
+            # if we're training non-target tuning parameters, apply selection mask
+            if train_B:
+                grad[(N + M):(N + M + N * M)] *= B_mask.ravel()
+            else:
+                grad[(N + M):(N + M + N * M)] = 0
+
+            # mask out gradients for parameters not being trained
+            if not train_Psi_tr_nt:
+                grad[(N + M + N * M + 1):(N + M + N * M + N + 1)] = 0
+            if not train_Psi_tr:
+                grad[(N + M + N * M):(N + M + N * M + N + 1)] = 0
+            if not train_L_nt:
+                mask = np.zeros(grad[(N + M + N * M + N + 1):].size)
+                mask[0::(N + 1)] = np.ones(K)
+                grad[(N + M + N * M + N + 1):] *= mask
+            if not train_L:
+                grad[(N + M + N * M + N + 1):] = 0
 
         return loss.detach().numpy(), grad
 
