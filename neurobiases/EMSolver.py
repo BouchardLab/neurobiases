@@ -1456,6 +1456,8 @@ class EMSolver():
         expected complete log-likelihood and gradients with respect to all
         parameters.
 
+        Uses pytorch for gradient calculations. This version is meant for testing.
+
         Parameters
         ----------
         X : np.ndarray, shape (D, M)
@@ -1706,10 +1708,12 @@ class EMSolver():
         y_residual = y - X @ b - Y @ a
         y_res_sqr = np.dot(y_residual.ravel(), y_residual.ravel())
         Y_residual = Y - X @ B
-        muL = mu @ L_nt
         mu_Lt = mu @ l_t
         mu_Lnt = mu @ L_nt
         y_r_minus_muLt = y_residual - mu_Lt
+        mu_Lnt_Psi_nt = mu_Lnt / Psi_nt
+        Y_res_Psi_nt = Y_residual / Psi_nt
+        Psi_nt2 = Psi_nt**2
 
         # calculate expected complete log-likelihood, term by term
         # see paper for derivation
@@ -1717,10 +1721,10 @@ class EMSolver():
         term2 = y_res_sqr / Psi_t / D
         term3 = (-2. / Psi_t) * np.dot(y_residual.ravel(), (mu @ l_t).ravel()) / D
         term4 = np.mean(np.matmul(np.transpose(np.matmul(zz, l_t), (0, 2, 1)), l_t[np.newaxis])) / Psi_t
-        term5 = np.dot(Y_residual.ravel(), (Y_residual / Psi_nt).ravel()) / D
-        term6 = -2 * np.dot(Y_residual.ravel(), (muL / Psi_nt).ravel()) / D
+        term5 = np.dot(Y_residual.ravel(), (Y_res_Psi_nt).ravel()) / D
+        term6 = -2 * np.dot(Y_residual.ravel(), (mu_Lnt_Psi_nt).ravel()) / D
         term7a = np.sum(L_nt * ((L_nt.T / Psi_nt.T) @ sigma).T)
-        term7b = np.dot(muL.ravel(), (muL / Psi_nt).ravel()) / D
+        term7b = np.dot(mu_Lnt.ravel(), (mu_Lnt_Psi_nt).ravel()) / D
         # calculate loss and perform autograd
         loss = term1 + term2 + term3 + term4 + term5 + term6 + term7a + term7b
 
@@ -1729,17 +1733,16 @@ class EMSolver():
         # Tuning parameters gradient
         b_grad = -2 * np.mean(X * y_r_minus_muLt, axis=0) / Psi_t
         # Non-target tuning parameters
-        B_grad = 2. * (- np.mean(np.matmul(X[:, :, np.newaxis],
-                                           Y_residual[:, np.newaxis]), axis=0)
-                       + np.mean(np.matmul(X[:, :, np.newaxis],
-                                           mu_Lnt[:, np.newaxis]), axis=0)) / Psi_nt
+        B_grad = 2. * (- np.mean(X[:, :, np.newaxis]
+                                 @ (Y_residual[:, np.newaxis]
+                                    - mu_Lnt[:, np.newaxis]), axis=0)) / Psi_nt
         # Target latent factors
         l_t_grad = 2. * (-np.mean(y_residual * mu, axis=0)
                          + np.mean(zz @ l_t, axis=0).squeeze()) / Psi_t
         # Non-target latent factors
-        L_nt_grad = 2. * (-np.mean(np.matmul(mu[:, :, np.newaxis], Y_residual[:, np.newaxis]), axis=0)
+        L_nt_grad = 2. * (-np.mean(mu[:, :, np.newaxis] @ Y_residual[:, np.newaxis], axis=0)
                           + (sigma @ L_nt)
-                          + np.mean((np.matmul(mu[:, :, np.newaxis], mu[:, np.newaxis]) @ L_nt), axis=0)) / Psi_nt
+                          + np.mean((mu[:, :, np.newaxis] @ (mu @ L_nt)[:, np.newaxis]), axis=0)) / Psi_nt
         # Private variance, target neuron
         Psi_t_grad = (1. / Psi_t
                       - y_res_sqr / (Psi_t**2 * D)
@@ -1747,10 +1750,10 @@ class EMSolver():
                       - (1. / Psi_t**2) * np.mean((zz @ l_t).squeeze() @ l_t))
         # Private variance, non-target neurons
         Psi_nt_grad = (1. / Psi_nt
-                       - np.mean(Y_residual**2, axis=0) / Psi_nt**2
-                       + 2 * np.mean(Y_residual * mu_Lnt, axis=0) / Psi_nt**2
-                       - np.diag(L_nt.T @ sigma @ L_nt) / Psi_nt**2
-                       - np.mean(mu_Lnt**2, axis=0) / Psi_nt**2)
+                       - np.mean(Y_res_Psi_nt**2, axis=0)
+                       + 2 * np.mean(Y_residual * mu_Lnt, axis=0) / Psi_nt2
+                       - np.sum(L_nt * (sigma @ L_nt), axis=0) / Psi_nt2
+                       - np.mean(mu_Lnt_Psi_nt**2, axis=0))
         L_grad = np.concatenate([l_t_grad[:, np.newaxis], L_nt_grad], axis=1)
         Psi_grad = np.concatenate([Psi_t_grad[:, np.newaxis], Psi_nt_grad], axis=1)
         if not wrt_Psi:
