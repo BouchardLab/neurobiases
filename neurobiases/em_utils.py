@@ -2,6 +2,7 @@ import numpy as np
 import torch
 
 from .utils import inv_softplus
+from scipy.special import expit
 
 
 def split_tparams(tparams, N, M, K):
@@ -149,12 +150,46 @@ def Psi_tr_to_Psi(Psi_tr, transform):
         if isinstance(Psi_tr, np.ndarray):
             Psi = np.exp(Psi_tr)
         elif isinstance(Psi_tr, torch.Tensor):
-            Psi = torch.log(Psi_tr)
+            Psi = torch.exp(Psi_tr)
         else:
             raise ValueError('Invalid type for Psi transform.')
     else:
         raise ValueError('Invalid Psi transform.')
     return Psi
+
+
+def Psi_grad_to_Psi_tr_grad(Psi_grad, Psi_tr, transform):
+    """Takes the grad wrt Psi back to Psi transformed.
+
+    Parameters
+    ----------
+    Psi_grad : np.ndarray
+        Grad wrt Psi.
+    Psi_tr : np.ndarray
+        Psi transform.
+
+    Returns
+    -------
+    Psi_tr_grad : np.ndarray
+        Grad wrt Psi_tr.
+    """
+    if transform == 'softplus':
+        if isinstance(Psi_grad, np.ndarray):
+            Psi_tr_grad = expit(Psi_tr) * Psi_grad
+        elif isinstance(Psi_grad, torch.Tensor):
+            Psi_tr_grad = torch.sigmoid(Psi_tr) * Psi_grad
+        else:
+            raise ValueError('Invalid type for Psi grad.')
+    elif transform == 'exp':
+        if isinstance(Psi_grad, np.ndarray):
+            Psi_tr_grad = np.exp(Psi_tr) * Psi_grad
+        elif isinstance(Psi_grad, torch.Tensor):
+            Psi_tr_grad = torch.exp(Psi_tr) * Psi_grad
+        else:
+            raise ValueError('Invalid type for Psi transform.')
+    else:
+        raise ValueError('Invalid Psi transform.')
+    return Psi_tr_grad
 
 
 def Psi_to_Psi_tr(Psi, transform):

@@ -1446,14 +1446,17 @@ class EMSolver():
 
         return loss, grad
 
+
     @staticmethod
-    def f_df_em(params, X, Y, y, a_mask, b_mask, B_mask, train_B, train_L_nt,
-                train_L, train_Psi_tr_nt, train_Psi_tr, mu, zz, sigma,
-                tuning_to_coupling_ratio, penalize_B=False, Psi_transform='softplus',
-                wrt_Psi=False, storage=None, index=False, all_params=None):
+    def _f_df_em(params, X, Y, y, a_mask, b_mask, B_mask, train_B, train_L_nt,
+                 train_L, train_Psi_tr_nt, train_Psi_tr, mu, zz, sigma,
+                 tuning_to_coupling_ratio, penalize_B=False, Psi_transform='softplus',
+                 wrt_Psi=False, storage=None, index=False, all_params=None):
         """Helper function for the M-step in the EM procedure. Calculates the
         expected complete log-likelihood and gradients with respect to all
         parameters.
+
+        Uses pytorch for gradient calculations. This version is meant for testing.
 
         Parameters
         ----------
@@ -1561,14 +1564,13 @@ class EMSolver():
         # calculate expected complete log-likelihood, term by term
         # see paper for derivation
         term1 = torch.sum(torch.log(Psi))
-        term2 = torch.mean(y_residual**2 / Psi[0])
-        term3 = torch.mean((-2. / Psi[0]) * y_residual * torch.mm(mu, l_t))
-        term4 = torch.mean(
-            torch.matmul(torch.transpose(torch.matmul(zz, l_t), 1, 2), l_t)) / Psi[0]
-        term5 = torch.sum(Y_residual**2 / Psi_nt.t()) / D
-        term6 = -2 * torch.sum(Y_residual * muL / Psi_nt.t()) / D
-        term7a = torch.trace(torch.chain_matmul(L_nt, L_nt.t() / Psi_nt, sigma))
-        term7b = torch.sum(muL**2 / Psi_nt.t()) / D
+        term2 = torch.dot(y_residual.ravel(), y_residual.ravel()) / Psi[0] / D
+        term3 = (-2. / Psi[0]) * torch.dot(y_residual.ravel(), torch.mm(mu, l_t).ravel()) / D
+        term4 = torch.mean(torch.matmul(torch.transpose(torch.matmul(zz, l_t), 1, 2), l_t)) / Psi[0]
+        term5 = torch.dot(Y_residual.ravel(), (Y_residual / Psi_nt.t()).ravel()) / D
+        term6 = -2 * torch.dot(Y_residual.ravel(), (muL / Psi_nt.t()).ravel()) / D
+        term7a = torch.sum(L_nt * torch.mm(L_nt.t() / Psi_nt, sigma).t())
+        term7b = torch.dot(muL.ravel(), (muL / Psi_nt.t()).ravel()) / D
         # calculate loss and perform autograd
         loss = term1 + term2 + term3 + term4 + term5 + term6 + term7a + term7b
         loss.backward()
@@ -1601,6 +1603,193 @@ class EMSolver():
                 grad[(N + M + N * M + N + 1):] = 0
 
         return loss.detach().numpy(), grad
+
+
+    @staticmethod
+    def f_df_em(params, X, Y, y, a_mask, b_mask, B_mask, train_B, train_L_nt,
+                train_L, train_Psi_tr_nt, train_Psi_tr, mu, zz, sigma,
+                tuning_to_coupling_ratio, penalize_B=False, Psi_transform='softplus',
+                wrt_Psi=False, storage=None, index=False, all_params=None):
+        """Helper function for the M-step in the EM procedure. Calculates the
+        expected complete log-likelihood and gradients with respect to all
+        parameters.
+
+        Parameters
+        ----------
+        X : np.ndarray, shape (D, M)
+            Design matrix for tuning features.
+        Y : np.ndarray, shape (D, N)
+            Design matrix for coupling features.
+        y : np.ndarray, shape (D, 1)
+            Neural response vector.
+        a_mask : np.ndarray, shape (N, 1)
+            Mask for coupling features.
+        b_mask : nd-array, shape (M, 1)
+            Mask for tuning features.
+        B_mask : nd-array, shape (N, M)
+            Mask for non-target neuron tuning features.
+        train_B : bool
+            If True, non-target tuning parameters will be trained.
+        train_L_nt : bool
+            If True, non-target latent factors will be trained.
+        train_L : bool
+            If True, latent factors will be trained. Takes precedence over
+            train_L_nt.
+        train_Psi_tr_nt : bool
+            If True, non-target private variances will be trained.
+        train_Psi_tr : bool
+            If True, private variances will be trained. Takes precedence over
+            train_Psi_tr_nt.
+        mu : np.ndarray, shape (D, K)
+            The expected value of the latent state across samples.
+        zz : np.ndarray, shape (D, K, K)
+            The expected second-order statistics of the latent state across
+            samples.
+        sigma : np.ndarray, shape (K, K)
+            The covariance of the latent states.
+
+        Returns
+        -------
+        loss : float
+            The value of the loss function, the expected complete log-likelihood.
+        grad : np.ndarray
+            The gradient of the loss with respect to all parameters. Any
+            variables whose training flag was set to False will have corresponding
+            gradients set equal to zero.
+        """
+        # Extract dimensions
+        D, M = X.shape
+        N = Y.shape[1]
+        K = mu.shape[1]
+
+        if isinstance(index, tuple) or index:
+            if not isinstance(index, tuple):
+                grad_mask = utils.grad_mask(N, M, K,
+                                            a_mask.ravel(),
+                                            b_mask.ravel(),
+                                            B_mask.ravel(),
+                                            train_B,
+                                            train_Psi_tr_nt,
+                                            train_Psi_tr,
+                                            train_L_nt,
+                                            train_L)
+                index = np.nonzero(grad_mask)
+            all_params = all_params.copy()
+            all_params[index] = params
+            params = all_params
+
+        # Option to take derivative w.r.t Psi rather than Psi_tr
+        if wrt_Psi:
+            a, b, B, Psi_tr, L = utils.split_tparams(params, N, M, K)
+            Psi = utils.Psi_tr_to_Psi(Psi_tr, Psi_transform)
+            params = np.concatenate((a.ravel(),
+                                     b.ravel(),
+                                     B.ravel(),
+                                     Psi.ravel(),
+                                     L.ravel()))
+
+        # Turn parameters into torch tensors
+        a, b, B, Psi_tr, L = utils.split_tparams(params, N, M, K)
+        # apply rescaling
+        b = b / tuning_to_coupling_ratio
+        if penalize_B:
+            B = B / tuning_to_coupling_ratio
+        # Split up terms into target/non-target components
+        if wrt_Psi:
+            Psi = Psi_tr
+        else:
+            Psi = utils.Psi_tr_to_Psi(Psi_tr, Psi_transform)
+        Psi_t = Psi[0]
+        Psi_nt = Psi[1:].T
+        l_t = L[:, 0].reshape(K, 1)
+        L_nt = L[:, 1:]
+
+        # useful terms for the expected complete log-likelihood
+        y_residual = y - X @ b - Y @ a
+        y_res_sqr = np.dot(y_residual.ravel(), y_residual.ravel())
+        Y_residual = Y - X @ B
+        mu_Lt = mu @ l_t
+        mu_Lnt = mu @ L_nt
+        y_r_minus_muLt = y_residual - mu_Lt
+        mu_Lnt_Psi_nt = mu_Lnt / Psi_nt
+        Y_res_Psi_nt = Y_residual / Psi_nt
+        Psi_nt2 = Psi_nt**2
+
+        # calculate expected complete log-likelihood, term by term
+        # see paper for derivation
+        term1 = np.log(Psi).sum()
+        term2 = y_res_sqr / Psi_t / D
+        term3 = (-2. / Psi_t) * np.dot(y_residual.ravel(), (mu @ l_t).ravel()) / D
+        term4 = np.mean(np.matmul(np.transpose(np.matmul(zz, l_t), (0, 2, 1)), l_t[np.newaxis])) / Psi_t
+        term5 = np.dot(Y_residual.ravel(), (Y_res_Psi_nt).ravel()) / D
+        term6 = -2 * np.dot(Y_residual.ravel(), (mu_Lnt_Psi_nt).ravel()) / D
+        term7a = np.sum(L_nt * ((L_nt.T / Psi_nt.T) @ sigma).T)
+        term7b = np.dot(mu_Lnt.ravel(), (mu_Lnt_Psi_nt).ravel()) / D
+        # calculate loss and perform autograd
+        loss = term1 + term2 + term3 + term4 + term5 + term6 + term7a + term7b
+
+        # extract gradient
+        a_grad = -2 * np.mean(Y * y_r_minus_muLt, axis=0) / Psi_t
+        # Tuning parameters gradient
+        b_grad = -2 * np.mean(X * y_r_minus_muLt, axis=0) / Psi_t
+        # Non-target tuning parameters
+        B_grad = 2. * (- np.mean(X[:, :, np.newaxis]
+                                 @ (Y_residual[:, np.newaxis]
+                                    - mu_Lnt[:, np.newaxis]), axis=0)) / Psi_nt
+        # Target latent factors
+        l_t_grad = 2. * (-np.mean(y_residual * mu, axis=0)
+                         + np.mean(zz @ l_t, axis=0).squeeze()) / Psi_t
+        # Non-target latent factors
+        L_nt_grad = 2. * (-np.mean(mu[:, :, np.newaxis] @ Y_residual[:, np.newaxis], axis=0)
+                          + (sigma @ L_nt)
+                          + np.mean((mu[:, :, np.newaxis] @ (mu @ L_nt)[:, np.newaxis]), axis=0)) / Psi_nt
+        # Private variance, target neuron
+        Psi_t_grad = (1. / Psi_t
+                      - y_res_sqr / (Psi_t**2 * D)
+                      + (2. / (Psi_t**2 * D)) * np.dot(y_residual.ravel(), mu_Lt.ravel())
+                      - (1. / Psi_t**2) * np.mean((zz @ l_t).squeeze() @ l_t))
+        # Private variance, non-target neurons
+        Psi_nt_grad = (1. / Psi_nt
+                       - np.mean(Y_res_Psi_nt**2, axis=0)
+                       + 2 * np.mean(Y_residual * mu_Lnt, axis=0) / Psi_nt2
+                       - np.sum(L_nt * (sigma @ L_nt), axis=0) / Psi_nt2
+                       - np.mean(mu_Lnt_Psi_nt**2, axis=0))
+        L_grad = np.concatenate([l_t_grad[:, np.newaxis], L_nt_grad], axis=1)
+        Psi_grad = np.concatenate([Psi_t_grad[:, np.newaxis], Psi_nt_grad], axis=1)
+        if not wrt_Psi:
+            Psi_grad = utils.Psi_grad_to_Psi_tr_grad(Psi_grad, Psi_tr.T, Psi_transform)
+        grad = np.concatenate((a_grad.ravel(),
+                               b_grad.ravel(),
+                               B_grad.ravel(),
+                               Psi_grad.ravel(),
+                               L_grad.ravel()))
+
+        # apply masks to the gradient
+        if isinstance(index, tuple):
+            grad = grad[index]
+        else:
+            grad[:N] *= a_mask.ravel()
+            grad[N:(N + M)] *= b_mask.ravel()
+
+            # if we're training non-target tuning parameters, apply selection mask
+            if train_B:
+                grad[(N + M):(N + M + N * M)] *= B_mask.ravel()
+            else:
+                grad[(N + M):(N + M + N * M)] = 0
+
+            # mask out gradients for parameters not being trained
+            if not train_Psi_tr_nt:
+                grad[(N + M + N * M + 1):(N + M + N * M + N + 1)] = 0
+            if not train_Psi_tr:
+                grad[(N + M + N * M):(N + M + N * M + N + 1)] = 0
+            if not train_L_nt:
+                mask = np.zeros(grad[(N + M + N * M + N + 1):].size)
+                mask[0::(N + 1)] = np.ones(K)
+                grad[(N + M + N * M + N + 1):] *= mask
+            if not train_L:
+                grad[(N + M + N * M + N + 1):] = 0
+
+        return loss, grad
 
     @staticmethod
     def f_df_em_owlbfgs(params, grad, *args):

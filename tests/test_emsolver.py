@@ -151,7 +151,7 @@ def test_ecll_gradient():
     solver = EMSolver(X, Y, y, K=K, initialization='zeros')
     # Calculate ECLL
     mu, zz, sigma = solver.e_step()
-    _, grad = solver.f_df_em(
+    _, grad = solver._f_df_em(
         solver.get_params(),
         X, Y, y,
         a_mask=solver.a_mask,
@@ -236,6 +236,88 @@ def test_ecll_gradient():
         - np.diag(L_nt.T @ sigma @ L_nt) / Psi_nt**2 \
         - np.mean(mu_Lnt**2, axis=0) / Psi_nt**2
     assert_allclose(Psi_nt_grad_true, Psi_nt_grad)
+
+
+def test_ecll_gradient_numpy():
+    """Tests that the gradient of the expected complete log-likelihood is
+    calculated correctly in f_df_em."""
+    # Generate triangular model and data
+    K = 2
+    tm = TriangularModel(parameter_design='direct_response', N=8, M=9, K=K)
+    X, Y, y = tm.generate_samples(n_samples=1000)
+    # Create EMSolver object
+    solver = EMSolver(X, Y, y, K=K, initialization='zeros')
+    # Calculate ECLL
+    mu, zz, sigma = solver.e_step()
+    f, grad = solver._f_df_em(
+        solver.get_params(),
+        X, Y, y,
+        a_mask=solver.a_mask,
+        b_mask=solver.b_mask,
+        B_mask=solver.B_mask,
+        train_B=solver.train_B,
+        train_L_nt=solver.train_L_nt,
+        train_L=solver.train_L,
+        train_Psi_tr_nt=solver.train_Psi_tr_nt,
+        train_Psi_tr=solver.train_Psi_tr,
+        Psi_transform=solver.Psi_transform,
+        mu=mu, zz=zz, sigma=sigma,
+        tuning_to_coupling_ratio=1,
+        penalize_B=False,
+        wrt_Psi=True)
+    f1, grad1 = solver.f_df_em(
+        solver.get_params(),
+        X, Y, y,
+        a_mask=solver.a_mask,
+        b_mask=solver.b_mask,
+        B_mask=solver.B_mask,
+        train_B=solver.train_B,
+        train_L_nt=solver.train_L_nt,
+        train_L=solver.train_L,
+        train_Psi_tr_nt=solver.train_Psi_tr_nt,
+        train_Psi_tr=solver.train_Psi_tr,
+        Psi_transform=solver.Psi_transform,
+        mu=mu, zz=zz, sigma=sigma,
+        tuning_to_coupling_ratio=1,
+        penalize_B=False,
+        wrt_Psi=True)
+    assert_allclose(f, f1)
+    assert_allclose(grad, grad1)
+
+    f, grad = solver._f_df_em(
+        solver.get_params(),
+        X, Y, y,
+        a_mask=solver.a_mask,
+        b_mask=solver.b_mask,
+        B_mask=solver.B_mask,
+        train_B=solver.train_B,
+        train_L_nt=solver.train_L_nt,
+        train_L=solver.train_L,
+        train_Psi_tr_nt=solver.train_Psi_tr_nt,
+        train_Psi_tr=solver.train_Psi_tr,
+        Psi_transform=solver.Psi_transform,
+        mu=mu, zz=zz, sigma=sigma,
+        tuning_to_coupling_ratio=1,
+        penalize_B=False,
+        wrt_Psi=False)
+    f1, grad1 = solver.f_df_em(
+        solver.get_params(),
+        X, Y, y,
+        a_mask=solver.a_mask,
+        b_mask=solver.b_mask,
+        B_mask=solver.B_mask,
+        train_B=solver.train_B,
+        train_L_nt=solver.train_L_nt,
+        train_L=solver.train_L,
+        train_Psi_tr_nt=solver.train_Psi_tr_nt,
+        train_Psi_tr=solver.train_Psi_tr,
+        Psi_transform=solver.Psi_transform,
+        mu=mu, zz=zz, sigma=sigma,
+        tuning_to_coupling_ratio=1,
+        penalize_B=False,
+        wrt_Psi=False)
+    assert_allclose(f, f1)
+    assert_allclose(grad, grad1)
 
 
 def test_ecll_gradient_index():
