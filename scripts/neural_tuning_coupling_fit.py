@@ -11,7 +11,7 @@ def main(args):
     if args.rng == -1:
         rng = None
     else:
-        rng = np.random.default_rng(args.rng)
+        rng = args.rng
     model = args.model
     dataset = args.dataset
     data_path = args.data_path
@@ -84,17 +84,17 @@ def main(args):
                 pack.get_tuning_modulation_and_preference(tuning_coefs[fold_idx])
 
         elif model == 'c':
-            (intercepts[fold_idx], coupling_coefs[fold_idx],
-             scores_train[fold_idx], scores_test[fold_idx], bics[fold_idx]) = \
-                analysis.tuning_fit(
-                    X=X_train,
-                    Y=Y_train,
-                    fitter=fitter,
-                    X_test=X_test,
-                    Y_test=Y_test)
+            raise NotImplementedError()
 
     # Write results to file
     with h5py.File(write_path, 'a') as results:
+        if 'X' not in list(results):
+            results['X'] = X
+        if 'Y' not in list(results):
+            results['Y'] = Y
+        if 'class_labels' not in list(results):
+            results['class_labels'] = class_labels
+
         group = results.create_group(write_group)
         group['intercepts'] = intercepts
         if model == 't':
