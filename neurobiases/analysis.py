@@ -48,60 +48,29 @@ def get_fitter(**kwargs):
     return fitter
 
 
-def get_modulations_and_preferences(form, coefs, **kwargs):
-    """Calculates the tuning modulations and preferences for a set of tuning
-    coefficients.
-
-    Additional kwargs detail the tuning curve structure.
+def import_data(dataset, data_path, n_gaussians=7, transform='square_root'):
+    """Interface with neuropacks to obtain design and response matrices.
 
     Parameters
     ----------
-    form : str
-        The form of the tuning coefficients. Currently supports 'cosine2'
-        (cosine basis functions with a period of pi), and 'gbf', or gaussian
-        basis functions.
-    coefs : np.ndarray
-        The tuning coefficients, with first dimension spanning different
-        tuning curves.
+    dataset : string
+        The neural dataset.
+    data_path : string
+        The path to the data.
+    n_gaussians : int
+        The number of gaussians in the basis function set (used for ecog pack).
+    transform : string
+        The transformation (used for pvc11 pack).
 
     Returns
     -------
-    modulations : np.ndarray
-        The tuning modulation for each tuning coefficient set.
-    preferences : np.ndarray
-        The tuning preference for each tuning coefficient set.
+    X, Y : np.ndarray
+        The design and response matrices.
+    class_labels : np.ndarray
+        The class labels for the design matrix.
+    pack : neuropack object
+        The neuropack for the dataset.
     """
-    # Cosine basis functions
-    if form == 'cosine2':
-        c1 = coefs[..., 0]
-        c2 = coefs[..., 1]
-        # Convert preferences to degrees and ensure it's within [0, 360)
-        preferences = np.arctan2(c2, c1) * (180/np.pi)
-        preferences[preferences < 0] += 360
-        preferences_rad = np.deg2rad(preferences)
-        # Divide by 2 and take the modulus to ensure its lies within [0, 180)
-        preferences = (preferences / 2) % 180
-        # Calculate modulation
-        modulations = 2 * (c2 - c1)/(np.sin(preferences_rad) - np.cos(preferences_rad))
-    # Gaussian basis functions
-    elif form == 'gbf':
-        # Determine the tuning curve structure
-        inputs = kwargs.get('inputs')
-        means = kwargs.get('means')
-        var = kwargs.get('var')
-        # Calculate tuning curve
-        norm = 1. / np.sqrt(2 * np.pi * var)
-        tuning_curve = np.sum(coefs * norm * np.exp(
-            -np.subtract.outer(inputs, means)**2 / (2 * var)
-        ), axis=1)
-        modulations = np.max(tuning_curve) - np.min(tuning_curve)
-        preference_idx = np.argmax(tuning_curve).ravel()
-        preferences = inputs[preference_idx]
-
-    return modulations, preferences
-
-
-def import_data(dataset, data_path, n_gaussians=7, transform='square_root'):
     # Electrocorticography, rat auditory cortex
     if dataset == 'ecog':
         # Create neuropack

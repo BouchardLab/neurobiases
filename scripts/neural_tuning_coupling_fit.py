@@ -12,7 +12,6 @@ def main(args):
         rng = None
     else:
         rng = np.random.default_rng(args.rng)
-
     model = args.model
     dataset = args.dataset
     data_path = args.data_path
@@ -20,7 +19,7 @@ def main(args):
     write_group = args.write_group
     n_folds = args.n_folds
     cv_verbose = args.cv_verbose
-
+    # Get fitting object
     fitter = analysis.get_fitter(**vars(args))
 
     # Get dataset
@@ -82,11 +81,7 @@ def main(args):
                     Y_test=Y_test)
             # Calculate modulation and preferences
             modulations[fold_idx], preferences[fold_idx] = \
-                analysis.get_modulations_and_preferences(
-                    form='',
-                    coefs=tuning_coefs[fold_idx],
-                    
-                )
+                pack.get_tuning_modulation_and_preference(tuning_coefs[fold_idx])
 
         elif model == 'c':
             (intercepts[fold_idx], coupling_coefs[fold_idx],
@@ -104,6 +99,8 @@ def main(args):
         group['intercepts'] = intercepts
         if model == 't':
             group['tuning_coefs'] = tuning_coefs
+            group['tuning_modulations'] = modulations
+            group['tuning_preferences'] = preferences
         elif model == 'c':
             group['coupling_coefs'] = coupling_coefs
         group['scores_train'] = scores_train
