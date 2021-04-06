@@ -91,8 +91,30 @@ def softplus(x, cap=100):
     return y
 
 
-def selection_accuracy(mask1, mask2):
-    """Calculates the selection accuracy (set overlap).
+def selection_accuracy(coef1, coef2):
+    """Calculates the selection accuracy for a batch of coefficients.
+
+    Parameters
+    ----------
+    coef1, coef2 : np.ndarray
+        The coefficients, with last dimension assumed to be the coefficient
+        values.
+
+    Returns
+    -------
+    selection_accuracy : float
+        The selection accuracy.
+    """
+    difference = np.sum(np.logical_xor(coef1, coef2), axis=-1)
+    size1 = np.count_nonzero(coef1, axis=-1)
+    size2 = np.count_nonzero(coef2, axis=-1)
+    selection_accuracy = 1 - difference / (size1 + size2)
+    return selection_accuracy
+
+
+def selection_accuracy_single(mask1, mask2):
+    """Calculates the selection accuracy (set overlap) on a single set of
+    masks.
 
     Parameters
     ----------
