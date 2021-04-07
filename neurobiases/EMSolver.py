@@ -1446,7 +1446,6 @@ class EMSolver():
 
         return loss, grad
 
-
     @staticmethod
     def _f_df_em(params, X, Y, y, a_mask, b_mask, B_mask, train_B, train_L_nt,
                  train_L, train_Psi_tr_nt, train_Psi_tr, mu, zz, sigma,
@@ -1604,7 +1603,6 @@ class EMSolver():
 
         return loss.detach().numpy(), grad
 
-
     @staticmethod
     def f_df_em(params, X, Y, y, a_mask, b_mask, B_mask, train_B, train_L_nt,
                 train_L, train_Psi_tr_nt, train_Psi_tr, mu, zz, sigma,
@@ -1720,7 +1718,8 @@ class EMSolver():
         term1 = np.log(Psi).sum()
         term2 = y_res_sqr / Psi_t / D
         term3 = (-2. / Psi_t) * np.dot(y_residual.ravel(), (mu @ l_t).ravel()) / D
-        term4 = np.mean(np.matmul(np.transpose(np.matmul(zz, l_t), (0, 2, 1)), l_t[np.newaxis])) / Psi_t
+        term4 = 1 / Psi_t * \
+            np.mean(np.matmul(np.transpose(np.matmul(zz, l_t), (0, 2, 1)), l_t[np.newaxis]))
         term5 = np.dot(Y_residual.ravel(), (Y_res_Psi_nt).ravel()) / D
         term6 = -2 * np.dot(Y_residual.ravel(), (mu_Lnt_Psi_nt).ravel()) / D
         term7a = np.sum(L_nt * ((L_nt.T / Psi_nt.T) @ sigma).T)
@@ -1740,9 +1739,10 @@ class EMSolver():
         l_t_grad = 2. * (-np.mean(y_residual * mu, axis=0)
                          + np.mean(zz @ l_t, axis=0).squeeze()) / Psi_t
         # Non-target latent factors
-        L_nt_grad = 2. * (-np.mean(mu[:, :, np.newaxis] @ Y_residual[:, np.newaxis], axis=0)
-                          + (sigma @ L_nt)
-                          + np.mean((mu[:, :, np.newaxis] @ (mu @ L_nt)[:, np.newaxis]), axis=0)) / Psi_nt
+        L_nt_grad = 2. / Psi_nt * (
+            -np.mean(mu[:, :, np.newaxis] @ Y_residual[:, np.newaxis], axis=0)
+            + (sigma @ L_nt)
+            + np.mean((mu[:, :, np.newaxis] @ (mu @ L_nt)[:, np.newaxis]), axis=0))
         # Private variance, target neuron
         Psi_t_grad = (1. / Psi_t
                       - y_res_sqr / (Psi_t**2 * D)
