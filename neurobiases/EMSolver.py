@@ -989,7 +989,7 @@ class EMSolver():
             return self.fit_em(
                 refit=False, verbose=verbose, mstep_verbose=mstep_verbose,
                 mll_curve=mll_curve, fista_max_iter=fista_max_iter,
-                fista_lr=fista_lr)
+                fista_lr=fista_lr, index=True)
         else:
             if mll_curve:
                 return mlls[:iteration]
