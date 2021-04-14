@@ -983,6 +983,9 @@ class EMSolver():
             a_mask = self.a.ravel() != 0
             b_mask = self.b.ravel() != 0
             B_mask = self.B != 0
+            self.c_coupling = 0
+            self.c_tuning = 0
+            self.solver = 'scipy_lbfgs'
             self.set_masks(a_mask=a_mask, b_mask=b_mask, B_mask=B_mask)
             if verbose:
                 print('Refitting EM estimates with new masks.')
