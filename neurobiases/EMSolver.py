@@ -1747,7 +1747,7 @@ class EMSolver():
         Psi_t_grad = (1. / Psi_t
                       - y_res_sqr / (Psi_t**2 * D)
                       + (2. / (Psi_t**2 * D)) * np.dot(y_residual.ravel(), mu_Lt.ravel())
-                      - (1. / Psi_t**2) * np.mean((zz @ l_t).squeeze() @ l_t))
+                      - (1. / Psi_t**2) * np.mean((zz @ l_t).squeeze(axis=2) @ l_t))
         # Private variance, non-target neurons
         Psi_nt_grad = (1. / Psi_nt
                        - np.mean(Y_res_Psi_nt**2, axis=0)

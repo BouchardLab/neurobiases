@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from neurobiases import TriangularModel, utils
-from neurobiases.solver_utils import marginal_log_likelihood_linear_tm_wrapper
+from neurobiases.em_utils import marginal_log_likelihood_linear_tm_wrapper
 from numpy.testing import assert_allclose, assert_raises
 
 
