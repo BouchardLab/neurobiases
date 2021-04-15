@@ -155,8 +155,7 @@ def cv_sparse_solver_single(
                 fa_rng=2332).fit_em(
                     verbose=fitter_verbose,
                     mstep_verbose=mstep_verbose,
-                    refit=refit
-                )
+                    refit=refit)
 
             # Store parameter fits
             a_est[task_idx] = fitter.a.ravel()

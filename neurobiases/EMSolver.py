@@ -39,32 +39,60 @@ class EMSolver():
         The non-target private variances.
     Psi : np.ndarray, shape (N + 1,)
         The private variances. This variable takes precedence over Psi_nt.
+    Psi_transform : str
+        The transformation to apply to the Psi parameters during optimization.
+        Options include 'softplus' (default) and 'exp'.
+    c_tuning : float
+        The sparsity penalty for the tuning parameters. If 'solver' is
+        scipy_lbfgs, this is automatically set equal to zero.
+    c_coupling : float
+        The sparsity penalty for the coupling parameters. If 'solver' is
+        scipy_lbfgs, this is automatically set equal to zero.
+    solver : str
+        The solver to use. Options include 'scipy_lbfgs' (non-sparse),
+        'ow_lbfgs' (sparse), and 'fista' (sparse).
     max_iter : int
         The maximum number of optimization iterations to perform.
     tol : float
         The tolerance with which the cease optimization.
-    rng  : RandomState or int or None
-        RandomState object, or int to create RandomState object.
+    penalize_B : bool
+        A boolean flag denoting whether to penalize the non-target tuning
+        parameters. Note that penalizing these parameters can greatly slow down
+        computation time.
+    initialization : str
+        The type of initialization to perform. Options include 'random'
+        (randomly initialized), 'zeros' (all set to zero, other than the
+        latent factors), and 'fits' (initialized to tuning, coupling, and
+        Factor Analysis fits).
+    fista_max_iter : float
+        The maximum number of iterations for FISTA. If 'solver' is not FISTA,
+        this is ignored.
+    fista_lr : float
+        The learning rate for FISTA. If 'solver' is not FISTA, this is ignored.
+    rng  : Generator or int or None
+        The random number generator, or seed, for the solver.
+    fa_rng : Generator or int or None
+        The random number generator, or seed, for the FactorAnalysis used in
+        a specific initialization case ('fits').
     """
     def __init__(
         self, X, Y, y, K, a_mask=None, b_mask=None, B_mask=None,
-        B=None, L_nt=None, L=None, Psi_nt=None, Psi=None, Psi_transform='softplus',
-        solver='scipy_lbfgs', max_iter=1000, tol=1e-4, c_tuning=0., c_coupling=0.,
-        penalize_B=False, initialization='zeros', rng=None, fa_rng=None
+        B=None, L_nt=None, L=None, Psi_nt=None, Psi=None,
+        Psi_transform='softplus', c_tuning=0., c_coupling=0.,
+        solver='scipy_lbfgs', max_iter=1000, tol=1e-4, penalize_B=False,
+        initialization='zeros', fista_max_iter=250, fista_lr=1e-6,
+        rng=None, fa_rng=None
     ):
-        # tuning and coupling design matrices
+        # Neural data
         self.X = X
         self.Y = Y
-        # response vector
         self.y = y
-        # number of latent factors
+        # Data dimensions
         self.K = K
-
-        # dataset dimensions
         self.D, self.M = self.X.shape
         self.N = self.Y.shape[1]
 
-        # optimization parameters
+        # Optimization settings
         self.Psi_transform = Psi_transform
         self.solver = solver
         self.max_iter = max_iter
@@ -75,17 +103,19 @@ class EMSolver():
         else:
             self.c_coupling = c_coupling
             self.c_tuning = c_tuning
+        self.fista_max_iter = fista_max_iter
+        self.fista_lr = fista_lr
         self.penalize_B = penalize_B
         self.rng = np.random.default_rng(rng)
         self.fa_rng = fa_rng
-        # initialize masks
+        # Initialize masks
         self.set_masks(a_mask=a_mask, b_mask=b_mask, B_mask=B_mask)
-        # initialize parameter estimates
+        # Initialize parameter estimates
         self.initialization = initialization
         self._init_params(initialization)
-        # initialize non-target tuning parameters
+        # Initialize non-target tuning parameters
         self.freeze_B(B=B)
-        # initialize variability parameters
+        # Initialize variability parameters
         self.freeze_var_params(L_nt=L_nt, L=L, Psi_nt=Psi_nt, Psi=Psi)
 
     def _init_params(self, initialization='zeros'):
@@ -592,41 +622,34 @@ class EMSolver():
         zz : np.ndarray, shape (D, K, K)
             The expected second-order statistics of the latent state across
             samples.
-
         sigma : np.ndarray, shape (K, K)
             The covariance of the latent states.
         """
-        # apply masks
+        # Apply masks
         a = self.a * self.a_mask
         b = self.b * self.b_mask
         B = self.B * self.B_mask
-
-        # private variances
+        # Private variances
         Psi = self.Psi_tr_to_Psi(self.Psi_tr)
         Psi_t, Psi_negt = np.split(Psi, [1])
-
-        # interaction terms
+        # Interaction terms
         LPsi = self.L / Psi
         lpsi_t, Lpsi_nt = np.split(LPsi, [1], axis=1)
-
-        # calculate covariance
+        # Calculate covariance
         sigma_inv = np.eye(self.K) + np.dot(LPsi, self.L.T)
         sigma = np.linalg.inv(sigma_inv)
-
-        # calculate mu
+        # Calculate mu
         y_residual = self.y - np.dot(self.X, b) - np.dot(self.Y, a)
         Y_residual = self.Y - np.dot(self.X, B)
         y_residual_scaled = np.dot(lpsi_t, y_residual.T)
         Y_residual_scaled = np.dot(Lpsi_nt, Y_residual.T)
         mu = np.dot(sigma, y_residual_scaled + Y_residual_scaled).T
-
-        # calculate zz
+        # Calculate zz
         zz = sigma[np.newaxis] + mu[..., np.newaxis] * mu[:, np.newaxis]
-
         return mu, zz, sigma
 
-    def m_step(self, mu, zz, sigma, verbose=False, fista_max_iter=250,
-               fista_lr=1e-6, store_parameters=False, index=False):
+    def m_step(self, mu, zz, sigma, verbose=False, store_parameters=False,
+               index=False, numpy=False):
         """Performs an M-step in the EM algorithm for the triangular model.
 
         Parameters
@@ -640,11 +663,22 @@ class EMSolver():
             The covariance of the latent states.
         verbose : bool
             If True, print callback statements.
+        store_parameters : bool
+            If True, stores the parameters and marginal log-likelihoods across
+            the optimization.
+        index : bool
+            If True, indexes the gradient to save computation time.
+        numpy : bool
+            If True, uses numpy to calculate gradients. Otherwise, uses autograd
+            in pytorch.
 
         Returns
         -------
         params : np.ndarray, shape (N + M + N * M + N + 1 + K * (N + 1),)
             A vector containing all parameters concatenated together.
+        storage : dict
+            A dictionary tracking parameter updates across this M-step. If
+            store_parameters is False, this is None.
         """
         # Get default values of parameters
         params = self.get_params()
@@ -654,24 +688,6 @@ class EMSolver():
 
         # Use scipy's LBFGS solver (can't apply sparsity)
         if self.solver == 'scipy_lbfgs':
-            # Create callback function for verbosity
-            if verbose:
-                # create callback function
-                def callback(params):
-                    print(
-                        'Expected complete log-likelihood:',
-                        self.expected_complete_ll(params, self.X, self.Y, self.y,
-                                                  mu, zz, sigma,
-                                                  c_coupling=0.,
-                                                  c_tuning=0.,
-                                                  a_mask=self.a_mask,
-                                                  b_mask=self.b_mask,
-                                                  B_mask=self.B_mask,
-                                                  transform_tuning=False,
-                                                  Psi_transform=self.Psi_transform)
-                    )
-            else:
-                callback = None
             all_params = None
             if index:
                 M = self.M
@@ -689,17 +705,49 @@ class EMSolver():
                 index = np.nonzero(grad_mask)
                 all_params = params.copy()
                 params = params[index]
+
+            # Create callback function for verbosity
+            if verbose:
+                def callback(params):
+                    print(
+                        'Expected complete log-likelihood:',
+                        self.expected_complete_ll(params, self.X, self.Y, self.y,
+                                                  mu, zz, sigma,
+                                                  c_coupling=0.,
+                                                  c_tuning=0.,
+                                                  a_mask=self.a_mask,
+                                                  b_mask=self.b_mask,
+                                                  B_mask=self.B_mask,
+                                                  transform_tuning=False,
+                                                  Psi_transform=self.Psi_transform,
+                                                  index=index,
+                                                  all_params=all_params)
+                    )
+            else:
+                callback = None
+
+            # Choose solver and run optimization
+            if numpy:
+                solver = self.f_df_em
+            else:
+                solver = self._f_df_em
             optimize = minimize(
-                self.f_df_em, x0=params,
+                solver, x0=params,
                 method='L-BFGS-B',
-                args=(self.X, self.Y, self.y,
-                      self.a_mask, self.b_mask, self.B_mask,
+                args=(self.X,
+                      self.Y,
+                      self.y,
+                      self.a_mask,
+                      self.b_mask,
+                      self.B_mask,
                       self.train_B,
                       self.train_L_nt,
                       self.train_L,
                       self.train_Psi_tr_nt,
                       self.train_Psi_tr,
-                      mu, zz, sigma,
+                      mu,
+                      zz,
+                      sigma,
                       1.,
                       self.penalize_B,
                       self.Psi_transform,
@@ -833,16 +881,26 @@ class EMSolver():
                 storage['Psi'] = np.zeros((10000, self.N + 1))
             else:
                 storage = None
+            if numpy:
+                solver = self.f_df_em_owlbfgs
+            else:
+                solver = self._f_df_em_owlbfgs
             params = fmin_lbfgs(
-                self.f_df_em_owlbfgs, x0=params,
-                args=(self.X, self.Y, self.y,
-                      self.a_mask, self.b_mask, self.B_mask,
+                solver, x0=params,
+                args=(self.X,
+                      self.Y,
+                      self.y,
+                      self.a_mask,
+                      self.b_mask,
+                      self.B_mask,
                       self.train_B,
                       self.train_L_nt,
                       self.train_L,
                       self.train_Psi_tr_nt,
                       self.train_Psi_tr,
-                      mu, zz, sigma,
+                      mu,
+                      zz,
+                      sigma,
                       tuning_to_coupling_ratio,
                       self.penalize_B,
                       self.Psi_transform,
@@ -862,7 +920,8 @@ class EMSolver():
                                      B.ravel(),
                                      Psi_tr.ravel(),
                                      L.ravel()))
-        # apply fista (for the sparse setting)
+
+        # Use the FISTA solver (sparse)
         elif self.solver == 'fista':
             zero_start = -1
             zero_end = -1
@@ -874,13 +933,25 @@ class EMSolver():
             if self.c_tuning > 0.:
                 one_start = self.N
                 one_end = self.N + self.M + self.N * self.M
-            args = (self.X, self.Y, self.y, self.a_mask, self.b_mask, self.B_mask,
-                    self.train_B, self.train_L_nt, self.train_L, self.train_Psi_tr_nt,
-                    self.train_Psi_tr, mu, zz, sigma, 1.)
+            args = (self.X,
+                    self.Y,
+                    self.y,
+                    self.a_mask,
+                    self.b_mask,
+                    self.B_mask,
+                    self.train_B,
+                    self.train_L_nt,
+                    self.train_L,
+                    self.train_Psi_tr_nt,
+                    self.train_Psi_tr,
+                    mu,
+                    zz,
+                    sigma,
+                    1.)
             params = utils.fista(self.f_df_em,
                                  params,
-                                 lr=fista_lr,
-                                 max_iter=fista_max_iter,
+                                 lr=self.fista_lr,
+                                 max_iter=self.fista_max_iter,
                                  C0=self.c_coupling,
                                  C1=self.c_tuning,
                                  zero_start=zero_start,
@@ -890,43 +961,41 @@ class EMSolver():
                                  verbose=verbose,
                                  args=args)
         else:
-            raise ValueError(f'Solver {self.solver} not available.')
+            raise ValueError(f"Solver {self.solver} not available.")
 
         return params, storage
 
     def fit_em(
-        self, refit=False, verbose=False, mstep_verbose=False, mll_curve=False,
-        fista_max_iter=250, fista_lr=1e-6, store_parameters=False, index=False
+        self, refit=False, verbose=False, mstep_verbose=False,
+        store_parameters=False, index=False, numpy=False
     ):
         """Fit the triangular model parameters using the EM algorithm.
 
         Parameters
         ----------
+        refit : bool
+            If True, performs re-estimation using the sparse set of parameters
+            as a mask.
         verbose : bool
             If True, print out EM iteration updates.
         mstep_verbose : bool
             If True, print out M-step iteration updates.
-        mll_curve : bool
-            If True, return a curve containing the marginal likelihoods at
-            each step of optimization.
-
-        Returns
-        -------
-        mlls : np.ndarray
-            An array containing the marginal log-likelihood of the model fit
-            at each EM iteration.
+        store_parameters : bool
+            If True, stores the parameters and marginal log-likelihoods across
+            the optimization.
+        index : bool
+            If True, indexes the gradient to save computation time.
+        numpy : bool
+            If True, uses numpy to calculate gradients. Otherwise, uses autograd
+            in pytorch.
         """
-        # initialize iteration count and change in likelihood
+        # Initialize iteration count, convergence criteria, and base mll
         iteration = 0
         del_ml = np.inf
-
-        # initialize storage for marginal log-likelihoods
-        mlls = np.zeros(self.max_iter + 1)
         base_mll = self.marginal_log_likelihood()
-        mlls[0] = base_mll
 
         if verbose:
-            print('Initial marginal likelihood: %f' % base_mll)
+            print(f"Initial marginal likelihood: {base_mll}.")
 
         if store_parameters:
             steps = []
@@ -938,16 +1007,15 @@ class EMSolver():
         # EM iteration loop: convergence if tolerance or maximum iterations
         # are reached
         while (del_ml > self.tol) and (iteration < self.max_iter):
-            # run E-step
+            # E-step, followed by M-step
             mu, zz, sigma = self.e_step()
-            # run M-step
             params, storage = self.m_step(
                 mu, zz, sigma,
                 verbose=mstep_verbose,
-                fista_max_iter=fista_max_iter,
-                fista_lr=fista_lr,
                 store_parameters=store_parameters,
-                index=index)
+                index=index,
+                numpy=numpy)
+            # Parameter and log-likelihood tracking across iterations
             if store_parameters:
                 n_steps = np.sum(storage['n_iterations'])
                 steps.append(n_steps)
@@ -958,27 +1026,24 @@ class EMSolver():
 
             self.a, self.b, self.B, self.Psi_tr, self.L = self.split_params(params)
             iteration += 1
-            # update marginal log-likelihood
+            # Update marginal log-likelihood
             current_mll = self.marginal_log_likelihood()
-            # calculate fraction change in marginal log-likelihood
+            # Calculate fraction change in marginal log-likelihood
             del_ml = np.abs(current_mll - base_mll) / np.abs(base_mll)
             base_mll = current_mll
-            mlls[iteration] = current_mll
 
             if verbose:
-                print(
-                    f'Iteration {iteration}: '
-                    f'del={del_ml:0.5E}, '
-                    f'mll={mlls[iteration]:0.7E}')
+                print(f"Iteration {iteration}: del={del_ml:0.5E}, "
+                      f'mll={current_mll:0.7E}')
         self.n_iterations = iteration + 1
-
+        # Save tracked parameters and log-likelihoods into object
         if store_parameters:
             self.steps = np.array(steps)
             self.ll_path = np.concatenate(ll_path, axis=0)
             self.a_path = np.concatenate(a_path, axis=0)
             self.b_path = np.concatenate(b_path, axis=0)
             self.Psi_path = np.concatenate(Psi_path, axis=0)
-
+        # Perform re-estimation using sparse mask
         if refit:
             a_mask = self.a.ravel() != 0
             b_mask = self.b.ravel() != 0
@@ -989,15 +1054,12 @@ class EMSolver():
             self.set_masks(a_mask=a_mask, b_mask=b_mask, B_mask=B_mask)
             if verbose:
                 print('Refitting EM estimates with new masks.')
-            return self.fit_em(
-                refit=False, verbose=verbose, mstep_verbose=mstep_verbose,
-                mll_curve=mll_curve, fista_max_iter=fista_max_iter,
-                fista_lr=fista_lr, index=True)
+            return self.fit_em(refit=False,
+                               verbose=verbose,
+                               mstep_verbose=mstep_verbose,
+                               index=True)
         else:
-            if mll_curve:
-                return mlls[:iteration]
-            else:
-                return self
+            return self
 
     def fit_ml(self, verbose=False):
         """Fit the parameters using maximum likelihood."""
@@ -1507,7 +1569,7 @@ class EMSolver():
         D, M = X.shape
         N = Y.shape[1]
         K = mu.shape[1]
-
+        # Check if we should be indexing
         if isinstance(index, tuple) or index:
             if not isinstance(index, tuple):
                 grad_mask = utils.grad_mask(N, M, K,
@@ -1537,7 +1599,7 @@ class EMSolver():
         # Turn parameters into torch tensors
         tparams = torch.tensor(params, requires_grad=True)
         a, b, B, Psi_tr, L = utils.split_tparams(tparams, N, M, K)
-        # apply rescaling
+        # Apply rescaling
         b = b / tuning_to_coupling_ratio
         if penalize_B:
             B = B / tuning_to_coupling_ratio
@@ -1563,8 +1625,7 @@ class EMSolver():
         Y_residual = Y - torch.mm(X, B)
         muL = torch.mm(mu, L_nt)
 
-        # calculate expected complete log-likelihood, term by term
-        # see paper for derivation
+        # Calculate expected complete log-likelihood, term by term
         term1 = torch.sum(torch.log(Psi))
         term2 = torch.dot(y_residual.ravel(), y_residual.ravel()) / Psi[0] / D
         term3 = (-2. / Psi[0]) * torch.dot(y_residual.ravel(), torch.mm(mu, l_t).ravel()) / D
@@ -1573,26 +1634,23 @@ class EMSolver():
         term6 = -2 * torch.dot(Y_residual.ravel(), (muL / Psi_nt.t()).ravel()) / D
         term7a = torch.sum(L_nt * torch.mm(L_nt.t() / Psi_nt, sigma).t())
         term7b = torch.dot(muL.ravel(), (muL / Psi_nt.t()).ravel()) / D
-        # calculate loss and perform autograd
         loss = term1 + term2 + term3 + term4 + term5 + term6 + term7a + term7b
+        # Calculate gradient using autograd
         loss.backward()
-        # extract gradient
         grad = tparams.grad.detach().numpy()
-
-        # apply masks to the gradient
+        # Apply masks to the gradient
         if isinstance(index, tuple):
             grad = grad[index]
         else:
+            # Tuning and coupling parameters
             grad[:N] *= a_mask.ravel()
             grad[N:(N + M)] *= b_mask.ravel()
-
-            # if we're training non-target tuning parameters, apply selection mask
+            # Non-target tuning parameters, with mask
             if train_B:
                 grad[(N + M):(N + M + N * M)] *= B_mask.ravel()
             else:
                 grad[(N + M):(N + M + N * M)] = 0
-
-            # mask out gradients for parameters not being trained
+            # Remaining parameters
             if not train_Psi_tr_nt:
                 grad[(N + M + N * M + 1):(N + M + N * M + N + 1)] = 0
             if not train_Psi_tr:
@@ -1662,7 +1720,7 @@ class EMSolver():
         D, M = X.shape
         N = Y.shape[1]
         K = mu.shape[1]
-
+        # Check if we should be indexing
         if isinstance(index, tuple) or index:
             if not isinstance(index, tuple):
                 grad_mask = utils.grad_mask(N, M, K,
@@ -1689,9 +1747,8 @@ class EMSolver():
                                      Psi.ravel(),
                                      L.ravel()))
 
-        # Turn parameters into torch tensors
         a, b, B, Psi_tr, L = utils.split_tparams(params, N, M, K)
-        # apply rescaling
+        # Apply rescaling
         b = b / tuning_to_coupling_ratio
         if penalize_B:
             B = B / tuning_to_coupling_ratio
@@ -1705,7 +1762,7 @@ class EMSolver():
         l_t = L[:, 0].reshape(K, 1)
         L_nt = L[:, 1:]
 
-        # useful terms for the expected complete log-likelihood
+        # Useful terms for the expected complete log-likelihood
         y_residual = y - X @ b - Y @ a
         y_res_sqr = np.dot(y_residual.ravel(), y_residual.ravel())
         Y_residual = Y - X @ B
@@ -1716,8 +1773,7 @@ class EMSolver():
         Y_res_Psi_nt = Y_residual / Psi_nt
         Psi_nt2 = Psi_nt**2
 
-        # calculate expected complete log-likelihood, term by term
-        # see paper for derivation
+        # Calculate expected complete log-likelihood, term by term
         term1 = np.log(Psi).sum()
         term2 = y_res_sqr / Psi_t / D
         term3 = (-2. / Psi_t) * np.dot(y_residual.ravel(), (mu @ l_t).ravel()) / D
@@ -1727,17 +1783,19 @@ class EMSolver():
         term6 = -2 * np.dot(Y_residual.ravel(), (mu_Lnt_Psi_nt).ravel()) / D
         term7a = np.sum(L_nt * ((L_nt.T / Psi_nt.T) @ sigma).T)
         term7b = np.dot(mu_Lnt.ravel(), (mu_Lnt_Psi_nt).ravel()) / D
-        # calculate loss and perform autograd
         loss = term1 + term2 + term3 + term4 + term5 + term6 + term7a + term7b
 
-        # extract gradient
+        # Calculate gradient by hand
         a_grad = -2 * np.mean(Y * y_r_minus_muLt, axis=0) / Psi_t
         # Tuning parameters gradient
         b_grad = -2 * np.mean(X * y_r_minus_muLt, axis=0) / Psi_t
+        b_grad /= tuning_to_coupling_ratio
         # Non-target tuning parameters
         B_grad = 2. * (- np.mean(X[:, :, np.newaxis]
                                  @ (Y_residual[:, np.newaxis]
                                     - mu_Lnt[:, np.newaxis]), axis=0)) / Psi_nt
+        if penalize_B:
+            B_grad /= tuning_to_coupling_ratio
         # Target latent factors
         l_t_grad = 2. * (-np.mean(y_residual * mu, axis=0)
                          + np.mean(zz @ l_t, axis=0).squeeze()) / Psi_t
@@ -1766,21 +1824,19 @@ class EMSolver():
                                B_grad.ravel(),
                                Psi_grad.ravel(),
                                L_grad.ravel()))
-
-        # apply masks to the gradient
+        # Apply masks to the gradient
         if isinstance(index, tuple):
             grad = grad[index]
         else:
+            # Tuning and coupling parameters
             grad[:N] *= a_mask.ravel()
             grad[N:(N + M)] *= b_mask.ravel()
-
-            # if we're training non-target tuning parameters, apply selection mask
+            # Non-target tuning parameters, with mask
             if train_B:
                 grad[(N + M):(N + M + N * M)] *= B_mask.ravel()
             else:
                 grad[(N + M):(N + M + N * M)] = 0
-
-            # mask out gradients for parameters not being trained
+            # Remaining parameters
             if not train_Psi_tr_nt:
                 grad[(N + M + N * M + 1):(N + M + N * M + N + 1)] = 0
             if not train_Psi_tr:
@@ -1791,13 +1847,19 @@ class EMSolver():
                 grad[(N + M + N * M + N + 1):] *= mask
             if not train_L:
                 grad[(N + M + N * M + N + 1):] = 0
-
         return loss, grad
 
     @staticmethod
     def f_df_em_owlbfgs(params, grad, *args):
         """Wrapper for OW LBFGS"""
         loss, g = EMSolver.f_df_em(params, *args)
+        grad[:] = g
+        return loss
+
+    @staticmethod
+    def _f_df_em_owlbfgs(params, grad, *args):
+        """Wrapper for OW LBFGS"""
+        loss, g = EMSolver._f_df_em(params, *args)
         grad[:] = g
         return loss
 
@@ -2019,12 +2081,29 @@ class EMSolver():
     def expected_complete_ll(
         params, X, Y, y, mu, zz, sigma, c_coupling=0., c_tuning=0., a_mask=None,
         b_mask=None, B_mask=None, transform_tuning=False, Psi_transform='softplus',
-        penalize_B=False
+        penalize_B=False, index=False, all_params=None
     ):
         """Calculate the expected complete log-likelihood."""
         D, M = X.shape
         N = Y.shape[1]
         K = mu.shape[1]
+
+        # Check if we should be indexing
+        if isinstance(index, tuple) or index:
+            if not isinstance(index, tuple):
+                grad_mask = utils.grad_mask(N, M, K,
+                                            a_mask.ravel(),
+                                            b_mask.ravel(),
+                                            B_mask.ravel(),
+                                            train_B=True,
+                                            train_Psi_tr_nt=True,
+                                            train_Psi_tr=True,
+                                            train_L_nt=True,
+                                            train_L=True)
+                index = np.nonzero(grad_mask)
+            all_params = all_params.copy()
+            all_params[index] = params
+            params = all_params
 
         # extract parameters
         a = params[:N]
