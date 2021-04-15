@@ -102,6 +102,7 @@ def main(args):
             max_iter=max_iter,
             tol=tol,
             refit=True,
+            numpy=args.numpy,
             comm=comm,
             cv_verbose=args.cv_verbose,
             fitter_verbose=args.fitter_verbose,
@@ -133,6 +134,10 @@ def main(args):
             # Estimated parameters
             results['a_est'] = a_est
             results['b_est'] = b_est
+            # Data
+            results['X'] = X
+            results['Y'] = Y
+            results['y'] = y
 
         t1 = time.time()
         print(
@@ -156,6 +161,7 @@ if __name__ == '__main__':
     parser.add_argument('--cv_verbose', action='store_true')
     parser.add_argument('--fitter_verbose', action='store_true')
     parser.add_argument('--mstep_verbose', action='store_true')
+    parser.add_argument('--numpy', action='store_true')
     parser.add_argument('--warn', action='store_true')
     args = parser.parse_args()
 

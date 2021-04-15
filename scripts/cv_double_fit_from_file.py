@@ -157,6 +157,7 @@ def main(args):
             cv=cv,
             solver=solver,
             initialization=initialization,
+            numpy=args.numpy,
             max_iter=max_iter,
             tol=tol,
             refit=True,
@@ -230,6 +231,7 @@ if __name__ == '__main__':
     parser.add_argument('--cv_verbose', action='store_true')
     parser.add_argument('--fitter_verbose', action='store_true')
     parser.add_argument('--mstep_verbose', action='store_true')
+    parser.add_argument('--numpy', action='store_true')
     parser.add_argument('--warn', action='store_true')
     args = parser.parse_args()
 
