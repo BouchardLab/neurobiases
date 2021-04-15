@@ -12,7 +12,7 @@ from sklearn.utils.extmath import cartesian
 def cv_sparse_solver_single(
     method, X, Y, y, coupling_lambdas, tuning_lambdas, Ks=np.array([1]), cv=5,
     solver='ow_lbfgs', initialization='fits', max_iter=1000, tol=1e-4,
-    refit=False, fitter_rng=None, comm=None, cv_verbose=False,
+    refit=False, fitter_rng=None, numpy=False, comm=None, cv_verbose=False,
     fitter_verbose=False, mstep_verbose=False
 ):
     """Performs a cross-validated, sparse EM fit on the triangular model.
@@ -155,7 +155,8 @@ def cv_sparse_solver_single(
                 fa_rng=2332).fit_em(
                     verbose=fitter_verbose,
                     mstep_verbose=mstep_verbose,
-                    refit=refit)
+                    refit=refit,
+                    numpy=numpy)
 
             # Store parameter fits
             a_est[task_idx] = fitter.a.ravel()

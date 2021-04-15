@@ -86,8 +86,7 @@ def main(args):
         tuning_loc=tuning_loc,
         tuning_scale=tuning_scale,
         tuning_rng=tuning_rng,
-        stim_distribution='uniform'
-    )
+        stim_distribution='uniform')
     # Generate data using seed
     X, Y, y = tm.generate_samples(n_samples=D, rng=int(dataset_rng))
 
@@ -111,8 +110,7 @@ def main(args):
             cv_verbose=args.cv_verbose,
             fitter_verbose=args.fitter_verbose,
             mstep_verbose=args.mstep_verbose,
-            fitter_rng=fitter_rng
-        )
+            fitter_rng=fitter_rng)
 
     if rank == 0:
         # Identify best hyperparameter set according to BIC
@@ -166,8 +164,7 @@ def main(args):
             cv_verbose=args.cv_verbose,
             fitter_verbose=args.fitter_verbose,
             mstep_verbose=args.mstep_verbose,
-            fitter_rng=fitter_rng
-        )
+            fitter_rng=fitter_rng)
     if model_fit == 'em':
         mlls, bics, a_est, b_est, B_est, Psi_est, L_est = fine_sweep_results
     elif model_fit == 'tc':
