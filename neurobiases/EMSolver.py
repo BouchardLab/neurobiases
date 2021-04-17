@@ -499,6 +499,44 @@ class EMSolver():
         """
         return utils.Psi_to_Psi_tr(Psi, self.Psi_transform)
 
+    def aic(self, X=None, Y=None, y=None):
+        """Calculates the Akaike information criterion on the neural data.
+
+        Parameters
+        ----------
+        X : np.ndarray, shape (D, M)
+            Design matrix for tuning features.
+        Y : np.ndarray, shape (D, N)
+            Design matrix for coupling features.
+        y : np.ndarray, shape (D, 1)
+            Neural response vector.
+
+        Returns
+        -------
+        bic : float
+            The Bayesian information criterion.
+        """
+        # if no data is provided, use the data in the object
+        if X is None:
+            X = self.X
+        if Y is None:
+            Y = self.Y
+        if y is None:
+            y = self.y
+
+        Psi = self.Psi_tr_to_Psi(self.Psi_tr)
+        # calculate marginal log-likelihood
+        mll = self.marginal_log_likelihood(X=X, Y=Y, y=y)
+        # number of parameters
+        k = \
+            np.count_nonzero(self.a) + \
+            np.count_nonzero(self.b) + \
+            np.count_nonzero(self.B) + \
+            np.count_nonzero(self.L) + \
+            Psi.size
+        aic = 2 * k - 2 * mll
+        return aic
+
     def bic(self, X=None, Y=None, y=None):
         """Calculates the Bayesian information criterion on the neural data.
 
@@ -570,8 +608,7 @@ class EMSolver():
         mll = utils.marginal_log_likelihood_linear_tm(
             X=X, Y=Y, y=y, a=self.a, b=self.b, B=self.B, L=self.L,
             Psi=Psi, a_mask=self.a_mask, b_mask=self.b_mask,
-            B_mask=self.B_mask
-        )
+            B_mask=self.B_mask)
         return mll
 
     def marginal_likelihood_hessian(self, mask=False, wrt_Psi=True):

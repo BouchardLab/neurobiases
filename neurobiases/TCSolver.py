@@ -1,8 +1,7 @@
 import numpy as np
 
 from .lbfgs import fmin_lbfgs
-from scipy.optimize import nnls
-from sklearn.linear_model import LinearRegression, Lasso
+from sklearn.linear_model import Lasso, LassoCV, LinearRegression
 
 
 class TCSolver():
@@ -23,9 +22,9 @@ class TCSolver():
         Mask for tuning features.
     """
     def __init__(
-        self, X, Y, y, a_mask=None, b_mask=None, solver='ow_lbfgs', c_tuning=0.,
-        c_coupling=0., initialization='random', max_iter=1000, tol=1e-4,
-        rng=None
+        self, X, Y, y, a_mask=None, b_mask=None, solver='ols', c_tuning=0.,
+        c_coupling=0., fit_intercept=True, initialization='random',
+        max_iter=1000, tol=1e-4, rng=None
     ):
         # Tuning and coupling design matrices
         self.X = X
@@ -44,8 +43,11 @@ class TCSolver():
         self.set_masks(a_mask=a_mask, b_mask=b_mask)
         # Optimization parameters
         self.solver = solver
+        self.fit_intercept = fit_intercept
         self.c_tuning = c_tuning
         self.c_coupling = c_coupling
+        if (self.c_tuning == 0) and (self.c_coupling == 0):
+            self.solver = 'ols'
 
     def _init_params(self):
         """Initialize parameter estimates. Requires that X, Y, and y are
@@ -129,36 +131,20 @@ class TCSolver():
         self.b[self.b_mask] = b_est
         return self
 
-    def fit_nnls(self):
-        """Fit non-negative least squares to the data.
+    def fit(self, refit=False, solver=None, verbose=False):
+        """Fit a tuning and coupling model to the data.
 
-        Returns
-        -------
-        a_hat : np.ndarray, shape (N,)
-            The fitted coupling parameters.
-        b_hat : nd-array, shape (M,)
-            The fitted tuning parameters.
-        """
-        # initialize storage
-        a_hat = np.zeros(self.N)
-        b_hat = np.zeros(self.M)
-        # apply masks
-        X = self.X[:, self.b_mask]
-        Y = self.Y[:, self.a_mask]
-        # form design matrix
-        Z = np.concatenate((X, Y), axis=1)
-        # fit OLS
-        coefs, _ = nnls(Z, self.y.ravel())
-        # extract fits into masked arrays
-        b_hat[self.b_mask], a_hat[self.a_mask] = np.split(coefs, [self.n_nonzero_tuning])
-        return a_hat, b_hat
-
-    def fit_lasso(self, refit=False, verbose=False):
-        """Fit a lasso regression to the data, using separate penalities on the
-        tuning and coupling parameters.
+        This function uses different solvers depending on the sparsity
+        conditions and requested solver.
 
         Parameters
         ----------
+        refit : bool
+            If True, the data is refit using OLS and the currently
+            instantiated masks.
+        solver : str or None
+            Temporary string to overwrite solver. If None, the default
+            solver is used. This is used exclusively for refitting.
         verbose : bool
             If True, print callback statement at each iteration.
 
@@ -169,9 +155,31 @@ class TCSolver():
         b_hat : nd-array, shape (M,)
             The fitted tuning parameters.
         """
+        if solver is None:
+            solver = self.solver
         params = self.get_params()
         # Use orthant-wise lbfgs solver
-        if self.solver == 'cd':
+        if solver == 'ols':
+            # Instantiate parameter estimates
+            a = np.zeros(self.N)
+            b = np.zeros(self.M)
+            # Apply masks to datasets
+            X = self.X[:, self.b_mask]
+            Y = self.Y[:, self.a_mask]
+            # Form total design matrix
+            Z = np.concatenate((X, Y), axis=1)
+            # Make sure we have selected some parameters
+            if Z.shape[1] > 0:
+                # Perform OLS fit
+                ols = LinearRegression(fit_intercept=self.fit_intercept)
+                ols.fit(Z, self.y.ravel())
+                # Extract fits into class variables
+                b_est, a_est = np.split(ols.coef_, [self.n_nonzero_tuning])
+                a[self.a_mask] = a_est
+                b[self.b_mask] = b_est
+
+        elif solver == 'cd':
+            # Both coupling and tuning are penalized
             if self.c_coupling != 0 and self.c_tuning != 0:
                 # Create scaling matrix for data
                 lambdas = np.diag(1. / np.concatenate((
@@ -187,18 +195,44 @@ class TCSolver():
                     fit_intercept=False,
                     normalize=False,
                     max_iter=self.max_iter,
-                    tol=self.tol)
-                solver.fit(Zpr, self.y.ravel())
+                    tol=self.tol).fit(Zpr, self.y.ravel())
                 # Rescale coefficients back
                 b, a = np.split(lambdas @ solver.coef_, [self.M])
+            # Tuning is not penalized, coupling is
             elif self.c_tuning == 0 and self.c_coupling != 0:
-                raise NotImplementedError()
+                # Non-penalized design matrix
+                Xnp = np.insert(self.X, 0, np.ones(self.D), axis=1)
+                # Penalized design matrix
+                Xp = self.Y.copy()
+                # Projection matrix for non-penalized design matrix
+                Pnp = Xnp @ (np.linalg.inv(Xnp.T @ Xnp)) @ Xnp.T
+                # Residual matrix for non-penalized design matrix
+                Mnp = np.identity(Pnp.shape[0]) - Pnp
+                # project out non-penalized regressors
+                y_ = Mnp @ self.y
+                Xp_ = Mnp @ Xp
+                # Run regression for both sets of coefficients
+                if self.c_coupling == 'cv':
+                    p_fitter = LassoCV(
+                        fit_intercept=False,
+                        cv=5,
+                        max_iter=self.max_iter,
+                        tol=self.tol).fit(Xp_, y_.ravel())
+                else:
+                    p_fitter = Lasso(
+                        fit_intercept=False,
+                        alpha=self.c_coupling,
+                        max_iter=self.max_iter,
+                        tol=self.tol).fit(Xp_, y_.ravel())
+                np_fitter = LinearRegression(fit_intercept=False)
+                np_fitter.fit(Xnp, self.y - Xp @ p_fitter.coef_)
+                a = p_fitter.coef_
+                b = np_fitter.coef_
+
             elif self.c_coupling == 0 and self.c_tuning != 0:
                 raise NotImplementedError()
-            else:
-                return self.fit_ols()
 
-        elif self.solver == 'ow_lbfgs':
+        elif solver == 'ow_lbfgs':
             # Create callable for verbosity
             if verbose:
                 # create callback function
@@ -256,7 +290,7 @@ class TCSolver():
         self.set_masks(a_mask=self.a != 0, b_mask=self.b != 0)
         # Perform a refitting using OLS, if necessary
         if refit:
-            return self.fit_ols()
+            return self.fit(solver='ols')
         else:
             return self
 

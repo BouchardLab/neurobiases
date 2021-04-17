@@ -100,6 +100,7 @@ def cv_sparse_solver_single(
     # Create storage arrays
     if method == 'em':
         mlls = np.zeros(n_tasks)
+        aics = np.zeros(n_tasks)
         bics = np.zeros(n_tasks)
         a_est = np.zeros((n_tasks, N))
         b_est = np.zeros((n_tasks, M))
@@ -108,12 +109,14 @@ def cv_sparse_solver_single(
         L_est = np.zeros((n_tasks, Ks.max(), N + 1))
     elif method == 'itsfa':
         mses = np.zeros(n_tasks)
+        aics = np.zeros(n_tasks)
         bics = np.zeros(n_tasks)
         a_est = np.zeros((n_tasks, N))
         b_est = np.zeros((n_tasks, M))
         B_est = np.zeros((n_tasks, M, N))
     elif method == 'tc':
         mses = np.zeros(n_tasks)
+        aics = np.zeros(n_tasks)
         bics = np.zeros(n_tasks)
         a_est = np.zeros((n_tasks, N))
         b_est = np.zeros((n_tasks, M))
@@ -169,7 +172,8 @@ def cv_sparse_solver_single(
                 X=X_test,
                 Y=Y_test,
                 y=y_test)
-            # Calculate BIC
+            # Calculate ICs
+            aics[task_idx] = fitter.aic()
             bics[task_idx] = fitter.bic()
         elif method == 'itsfa':
             raise NotImplementedError()
@@ -184,16 +188,16 @@ def cv_sparse_solver_single(
                 initialization=initialization,
                 max_iter=max_iter,
                 tol=tol,
-                rng=fitter_rng).fit_lasso(
+                rng=fitter_rng).fit(
                     refit=refit,
-                    verbose=fitter_verbose
-                )
+                    verbose=fitter_verbose)
             # Store parameter fits
             a_est[task_idx] = fitter.a.ravel()
             b_est[task_idx] = fitter.b.ravel()
             # Score the resulting fit
             mses[task_idx] = fitter.mse(X=X_test, Y=Y_test, y=y_test)
-            # Calculate BIC
+            # Calculate ICs
+            aics[task_idx] = fitter.aic()
             bics[task_idx] = fitter.bic()
 
         if cv_verbose:
@@ -244,11 +248,11 @@ def cv_sparse_solver_single(
             bics.shape = reshape
 
     if method == 'em':
-        return mlls, bics, a_est, b_est, B_est, Psi_est, L_est
+        return mlls, aics, bics, a_est, b_est, B_est, Psi_est, L_est
     elif method == 'itsfa':
-        return mses, bics, a_est, b_est, B_est
+        return mses, aics, bics, a_est, b_est, B_est
     elif method == 'tc':
-        return mses, bics, a_est, b_est
+        return mses, aics, bics, a_est, b_est
 
 
 def cv_solver_full(

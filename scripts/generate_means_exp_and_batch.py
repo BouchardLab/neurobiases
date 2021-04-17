@@ -140,6 +140,7 @@ def main(args):
                         params['coupling_lambdas'] = coupling_lambdas
                         params['tuning_lambdas'] = tuning_lambdas
                         # Training settings
+                        params.attrs['criterion'] = args.criterion
                         params.attrs['cv'] = args.cv
                         params.attrs['fine_sweep_frac'] = args.fine_sweep_frac
                         params.attrs['solver'] = args.solver
@@ -213,6 +214,7 @@ if __name__ == '__main__':
     parser.add_argument('--fine_sweep_frac', type=float, default=0.1)
     parser.add_argument('--max_K', type=int, default=1)
     parser.add_argument('--cv', type=int, default=3)
+    parser.add_argument('--criterion', type=str, default='bic')
     # Model parameters
     parser.add_argument('--coupling_distribution', default='gaussian')
     parser.add_argument('--coupling_sparsity', type=float, default=0.5)

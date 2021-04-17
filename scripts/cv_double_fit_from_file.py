@@ -52,6 +52,7 @@ def main(args):
         tuning_lambdas = params['tuning_lambdas'][:]
         n_tuning_lambdas = tuning_lambdas.size
         # Training settings
+        criterion = params.attrs['criterion']
         cv = params.attrs['cv']
         fine_sweep_frac = params.attrs['fine_sweep_frac']
         solver = params.attrs['solver']
@@ -113,10 +114,18 @@ def main(args):
             fitter_rng=fitter_rng)
 
     if rank == 0:
-        # Identify best hyperparameter set according to BIC
-        bics = coarse_sweep_results[1]
-        median_bics = np.median(bics, axis=-1)
-        best_hyps = np.unravel_index(np.argmin(median_bics), median_bics.shape)
+        if model_fit == 'em':
+            scores, aics, bics, a_est, b_est, B_est, Psi_est, L_est = coarse_sweep_results
+        elif model_fit == 'tc':
+            scores, aics, bics, a_est, b_est = coarse_sweep_results
+        # Identify best hyperparameter set according to criterion
+        if criterion == 'aic':
+            median_criterion = np.median(aics, axis=-1)
+        elif criterion == 'bic':
+            median_criterion = np.median(bics, axis=-1)
+        elif criterion == 'score':
+            median_criterion = -np.median(scores, axis=-1)
+        best_hyps = np.unravel_index(np.argmin(median_criterion), median_criterion.shape)
         best_c_coupling = coupling_lambdas[best_hyps[0]]
         best_c_tuning = tuning_lambdas[best_hyps[1]]
         if model_fit == 'em':
@@ -132,9 +141,26 @@ def main(args):
         tuning_lambdas = np.linspace(tuning_lambda_lower,
                                      tuning_lambda_upper,
                                      num=n_tuning_lambdas)
+        # Save coarse results
+        with h5py.File(file_path, 'a') as results:
+            results['coupling_lambdas_fine'] = coupling_lambdas
+            results['tuning_lambdas_fine'] = tuning_lambdas
+            # Metrics
+            results['aics_coarse'] = aics
+            results['bics_coarse'] = bics
+            results['scores_coarse'] = scores
+            # Estimated parameters
+            results['a_est_coarse'] = a_est
+            results['b_est_coarse'] = b_est
+            if model_fit == 'em':
+                results['B_est_coarse'] = B_est
+                results['Psi_est_coarse'] = Psi_est
+                results['L_est_coarse'] = L_est
+
         if verbose:
             print(f'First sweep complete. Best coupling lambda: {best_c_coupling}'
                   f' and best tuning lambda: {best_c_tuning}')
+
     # Broadcast new lambdas out
     coupling_lambdas = Bcast_from_root(coupling_lambdas, comm)
     tuning_lambdas = Bcast_from_root(tuning_lambdas, comm)
@@ -167,14 +193,19 @@ def main(args):
             mstep_verbose=args.mstep_verbose,
             fitter_rng=fitter_rng)
     if model_fit == 'em':
-        mlls, bics, a_est, b_est, B_est, Psi_est, L_est = fine_sweep_results
+        scores, aics, bics, a_est, b_est, B_est, Psi_est, L_est = fine_sweep_results
     elif model_fit == 'tc':
-        mses, bics, a_est, b_est = fine_sweep_results
+        scores, aics, bics, a_est, b_est = fine_sweep_results
 
     if rank == 0:
         # Get best overall fit
-        median_bics = np.median(bics, axis=-1)
-        best_hyps = np.unravel_index(np.argmin(median_bics), median_bics.shape)
+        if criterion == 'aic':
+            median_criterion = np.median(bics, axis=-1)
+        elif criterion == 'bic':
+            median_criterion = np.median(aics, axis=-1)
+        elif criterion == 'scores':
+            median_criterion = -np.median(scores, axis=-1)
+        best_hyps = np.unravel_index(np.argmin(median_criterion), median_criterion.shape)
         a_est_best = a_est[best_hyps]
         b_est_best = b_est[best_hyps]
         if model_fit == 'em':
@@ -184,11 +215,12 @@ def main(args):
 
         # Save results
         with h5py.File(file_path, 'a') as results:
-            if model_fit == 'em':
-                results['mlls'] = np.squeeze(mlls[best_hyps])
-            else:
-                results['mses'] = np.squeeze(mses[best_hyps])
-            results['bics'] = np.squeeze(bics[best_hyps])
+            results['aics_fine'] = aics
+            results['aics_best'] = np.squeeze(aics[best_hyps])
+            results['bics_fine'] = bics
+            results['bics_best'] = np.squeeze(bics[best_hyps])
+            results['scores_fine'] = scores
+            results['scores_best'] = np.squeeze(scores[best_hyps])
             # True parameters
             results['a_true'] = tm.a.ravel()
             results['b_true'] = tm.b.ravel()
@@ -196,11 +228,16 @@ def main(args):
             results['Psi_true'] = tm.Psi
             results['L_true'] = tm.L
             # Estimated parameters
+            results['a_est_fine'] = a_est
             results['a_est'] = a_est_best
+            results['b_est_fine'] = b_est
             results['b_est'] = b_est_best
             if model_fit == 'em':
+                results['B_est_fine'] = B_est
                 results['B_est'] = B_est_best
+                results['Psi_est_fine'] = Psi_est
                 results['Psi_est'] = Psi_est_best
+                results['L_est_fine'] = L_est
                 results['L_est'] = L_est_best
             # CV details
             results.attrs['best_coupling_lambda'] = coupling_lambdas[best_hyps[0]]
