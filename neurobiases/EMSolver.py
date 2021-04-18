@@ -611,6 +611,37 @@ class EMSolver():
             B_mask=self.B_mask)
         return mll
 
+    def mll_grad(self, wrt_Psi=True):
+        """Calculates the gradient of the marginal log-likelihood."""
+        params = self.get_params()
+        # Convert params to Psi if needed
+        if wrt_Psi:
+            a, b, B, Psi_tr, L = utils.split_tparams(params, self.N, self.M, self.K)
+            Psi = self.Psi_tr_to_Psi(Psi_tr)
+            params = np.concatenate((a.ravel(),
+                                     b.ravel(),
+                                     B.ravel(),
+                                     Psi.ravel(),
+                                     L.ravel()))
+
+        _, grad = self.f_df_ml(
+            params,
+            X=self.X,
+            Y=self.Y,
+            y=self.y,
+            K=self.K,
+            a_mask=self.a_mask,
+            b_mask=self.b_mask,
+            B_mask=self.B_mask,
+            train_B=True,
+            train_L_nt=True,
+            train_L=True,
+            train_Psi_tr_nt=True,
+            train_Psi_tr=True,
+            Psi_transform=self.Psi_transform,
+            wrt_Psi=wrt_Psi)
+        return grad
+
     def marginal_likelihood_hessian(self, mask=False, wrt_Psi=True):
         """Calculates the hessian of the marginal likelihood."""
         params = self.get_params()

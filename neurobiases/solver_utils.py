@@ -212,6 +212,7 @@ def cv_sparse_solver_single(
         # Gather tasks across all storage arrays
         if method == 'em':
             mlls = Gatherv_rows(mlls, comm)
+            aics = Gatherv_rows(aics, comm)
             bics = Gatherv_rows(bics, comm)
             a_est = Gatherv_rows(a_est, comm)
             b_est = Gatherv_rows(b_est, comm)
@@ -222,6 +223,7 @@ def cv_sparse_solver_single(
             raise NotImplementedError()
         elif method == 'tc':
             mses = Gatherv_rows(mses, comm)
+            aics = Gatherv_rows(aics, comm)
             bics = Gatherv_rows(bics, comm)
             a_est = Gatherv_rows(a_est, comm)
             b_est = Gatherv_rows(b_est, comm)
@@ -245,6 +247,7 @@ def cv_sparse_solver_single(
                 mses.shape = reshape
             a_est.shape = reshape + [-1]
             b_est.shape = reshape + [-1]
+            aics.shape = reshape
             bics.shape = reshape
 
     if method == 'em':

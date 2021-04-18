@@ -200,9 +200,9 @@ def main(args):
     if rank == 0:
         # Get best overall fit
         if criterion == 'aic':
-            median_criterion = np.median(bics, axis=-1)
-        elif criterion == 'bic':
             median_criterion = np.median(aics, axis=-1)
+        elif criterion == 'bic':
+            median_criterion = np.median(bics, axis=-1)
         elif criterion == 'scores':
             median_criterion = -np.median(scores, axis=-1)
         best_hyps = np.unravel_index(np.argmin(median_criterion), median_criterion.shape)
