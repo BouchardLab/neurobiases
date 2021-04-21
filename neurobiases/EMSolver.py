@@ -79,14 +79,22 @@ class EMSolver():
         self, X, Y, y, K, a_mask=None, b_mask=None, B_mask=None,
         B=None, L_nt=None, L=None, Psi_nt=None, Psi=None,
         Psi_transform='softplus', c_tuning=0., c_coupling=0.,
-        solver='scipy_lbfgs', max_iter=1000, tol=1e-4, penalize_B=False,
-        initialization='zeros', fista_max_iter=250, fista_lr=1e-6,
-        rng=None, fa_rng=None
+        solver='scipy_lbfgs', fit_intercept=False, max_iter=1000, tol=1e-4,
+        penalize_B=False, initialization='zeros', fista_max_iter=250,
+        fista_lr=1e-6, rng=None, fa_rng=None
     ):
         # Neural data
         self.X = X
         self.Y = Y
         self.y = y
+        self.fit_intercept = fit_intercept
+        if fit_intercept:
+            self.X_mean = X.mean(axis=0, keepdims=True)
+            self.Y_mean = Y.mean(axis=0, keepdims=True)
+            self.y_mean = y.mean(axis=0, keepdims=True)
+            self.X = X - self.X_mean
+            self.Y = Y - self.Y_mean
+            self.y = y - self.y_mean
         # Data dimensions
         self.K = K
         self.D, self.M = self.X.shape
@@ -1111,6 +1119,11 @@ class EMSolver():
             self.a_path = np.concatenate(a_path, axis=0)
             self.b_path = np.concatenate(b_path, axis=0)
             self.Psi_path = np.concatenate(Psi_path, axis=0)
+        if self.fit_intercept:
+            self.B_intercept = (self.Y_mean - self.X_mean @ self.B).ravel()
+            self.b_intercept = (self.y_mean
+                                - self.X_mean @ self.b
+                                - self.Y_mean @ self.a).item()
         # Perform re-estimation using sparse mask
         if refit:
             a_mask = self.a.ravel() != 0
