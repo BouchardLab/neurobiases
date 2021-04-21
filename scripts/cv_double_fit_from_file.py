@@ -125,6 +125,8 @@ def main(args):
             median_criterion = np.median(bics, axis=-1)
         elif criterion == 'score':
             median_criterion = -np.median(scores, axis=-1)
+        else:
+            raise ValueError('Incorrect criterion specified.')
         best_hyps = np.unravel_index(np.argmin(median_criterion), median_criterion.shape)
         best_c_coupling = coupling_lambdas[best_hyps[0]]
         best_c_tuning = tuning_lambdas[best_hyps[1]]
@@ -203,8 +205,10 @@ def main(args):
             median_criterion = np.median(aics, axis=-1)
         elif criterion == 'bic':
             median_criterion = np.median(bics, axis=-1)
-        elif criterion == 'scores':
+        elif criterion == 'score':
             median_criterion = -np.median(scores, axis=-1)
+        else:
+            raise ValueError('Incorrect criterion specified.')
         best_hyps = np.unravel_index(np.argmin(median_criterion), median_criterion.shape)
         a_est_best = a_est[best_hyps]
         b_est_best = b_est[best_hyps]
