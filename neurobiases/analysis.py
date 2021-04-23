@@ -1,6 +1,7 @@
 import neuropacks as packs
 import numpy as np
 
+from neurobiases import TCSolver
 from sklearn.linear_model import LassoCV, LinearRegression
 
 
@@ -161,3 +162,148 @@ def tuning_fit(X, Y, fitter, X_test=None, Y_test=None):
         return intercepts, tuning_coefs, train_scores, test_scores, bics
     else:
         return intercepts, tuning_coefs, train_scores, bics
+
+
+def coupling_fit(Y, fitter, Y_test=None):
+    """Perform a coupling fit across a set of neurons.
+
+    Parameters
+    ----------
+    Y : np.ndarray, shape (n_samples, n_units)
+        The response matrix, or neural activity matrix.
+    fitter : object
+        The fitting object.
+    Y_test : np.ndarray, shape (n_samples, n_features), optional
+        Test response matrix for calculating generalization performance. If
+        None, no test evaluation is performed.
+
+    Returns
+    -------
+    intercepts : np.ndarray, shape (n_units,)
+        The intercept for each fit.
+    coupling_coefs : np.ndarray, shape (n_units, n_features)
+        The tuning coefficient for each fit.
+    train_scores : np.ndarray, shape (n_units,)
+        The score of the model on training data.
+    test_scores : np.ndarray, shape (n_units,)
+        The score of the model on test data. Only returned if X_test and
+        Y_test are provided.
+    bics : np.ndarray, shape (n_units,)
+        The BIC evaluated on the training data.
+    """
+    n_units = Y.shape[1]
+    n_features = n_units - 1
+    # Create storage arrays
+    intercepts = np.zeros(n_units)
+    coupling_coefs = np.zeros((n_units, n_features))
+    train_scores = np.zeros(n_units)
+    # Check if we need to provide test performance
+    if Y_test is not None:
+        test_set = True
+        test_scores = np.zeros_like(train_scores)
+    bics = np.zeros_like(train_scores)
+
+    # Perform fits across units
+    for unit in range(n_units):
+        X_train = np.delete(Y, unit, axis=1)
+        y_train = Y[:, unit]
+        # Run tuning fit
+        fitter.fit(X_train, y_train)
+        # Store coefficients
+        intercepts[unit] = fitter.intercept_
+        coupling_coefs[unit] = fitter.coef_
+        # Evaluate model
+        train_scores[unit] = fitter.score(X_train, y_train)
+        if test_set:
+            X_test = np.delete(Y_test, unit, axis=1)
+            y_test = Y_test[:, unit]
+            test_scores[unit] = fitter.score(X_test, y_test)
+        n_features = 1 + np.count_nonzero(fitter.coef_)
+        bics[unit] = bic_linear(y_true=y_train,
+                                y_pred=fitter.predict(X_train),
+                                n_features=n_features)
+
+    if test_set:
+        return intercepts, coupling_coefs, train_scores, test_scores, bics
+    else:
+        return intercepts, coupling_coefs, train_scores, bics
+
+
+def tuning_and_coupling_fit(
+    X, Y, X_test=None, Y_test=None, solver='cd', c_tuning=0.,
+    c_coupling='cv', initialization='random', max_iter=10000, tol=1e-4,
+    refit=False, rng=None
+):
+    """Perform a tuning and coupling fit across a set of neurons.
+
+    Parameters
+    ----------
+    X : np.ndarray, shape (n_samples, n_features)
+        The design matrix.
+    Y : np.ndarray, shape (n_samples, n_units)
+        The response matrix, or neural activity matrix.
+    X_test : np.ndarray, shape (n_samples, n_features), optional
+        Test design matrix for calculating generalization performance. If
+        None, no test evaluation is performed.
+    Y_test : np.ndarray, shape (n_samples, n_features), optional
+        Test response matrix for calculating generalization performance. If
+        None, no test evaluation is performed.
+
+    Returns
+    -------
+    intercepts : np.ndarray, shape (n_units,)
+        The intercept for each fit.
+    tuning_coefs : np.ndarray, shape (n_units, n_features)
+        The tuning coefficient for each fit.
+    train_scores : np.ndarray, shape (n_units,)
+        The score of the model on training data.
+    test_scores : np.ndarray, shape (n_units,)
+        The score of the model on test data. Only returned if X_test and
+        Y_test are provided.
+    bics : np.ndarray, shape (n_units,)
+        The BIC evaluated on the training data.
+    """
+    n_units = Y.shape[1]
+    n_tuning_features = X.shape[1]
+    n_coupling_features = n_units - 1
+    # Create storage arrays
+    intercepts = np.zeros(n_units)
+    tuning_coefs = np.zeros((n_units, n_tuning_features))
+    coupling_coefs = np.zeros((n_units, n_coupling_features))
+    train_scores = np.zeros(n_units)
+    # Check if we need to provide test performance
+    if (X_test is not None) and (Y_test is not None):
+        test_set = True
+        test_scores = np.zeros_like(train_scores)
+    bics = np.zeros_like(train_scores)
+
+    # Perform fits across units
+    for unit in range(n_units):
+        fitter = TCSolver(
+            X=X,
+            Y=np.delete(Y, unit, axis=1),
+            y=Y[:, unit],
+            solver=solver,
+            c_tuning=c_tuning,
+            c_coupling=c_coupling,
+            fit_intercept=True,
+            initialization=initialization,
+            max_iter=max_iter,
+            tol=tol,
+            rng=rng).fit(refit=refit)
+        # Store coefficients
+        intercepts[unit] = fitter.intercept
+        tuning_coefs[unit] = fitter.b
+        coupling_coefs[unit] = fitter.a
+        # Evaluate model
+        train_scores[unit] = fitter.mse()
+        if test_set:
+            test_scores[unit] = fitter.mse(X=X_test,
+                                           Y=np.delete(Y_test, unit, axis=1),
+                                           y=Y_test[:, unit])
+        bics[unit] = fitter.bic()
+
+    if test_set:
+        return intercepts, coupling_coefs, tuning_coefs, train_scores, test_scores, bics
+    else:
+        return intercepts, coupling_coefs, tuning_coefs, train_scores, bics
