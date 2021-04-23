@@ -26,11 +26,18 @@ class TCSolver():
         c_coupling=0., fit_intercept=True, initialization='random',
         max_iter=1000, tol=1e-4, rng=None
     ):
-        # Tuning and coupling design matrices
+        # Neural data
         self.X = X
         self.Y = Y
-        # Response vector
         self.y = y
+        self.fit_intercept = fit_intercept
+        if fit_intercept:
+            self.X_mean = X.mean(axis=0, keepdims=True)
+            self.Y_mean = Y.mean(axis=0, keepdims=True)
+            self.y_mean = y.mean(axis=0, keepdims=True)
+            self.X = X - self.X_mean
+            self.Y = Y - self.Y_mean
+            self.y = y - self.y_mean
         # Random number generator
         self.rng = np.random.default_rng(rng)
         # Initialize parameter estimates
@@ -43,7 +50,6 @@ class TCSolver():
         self.set_masks(a_mask=a_mask, b_mask=b_mask)
         # Optimization parameters
         self.solver = solver
-        self.fit_intercept = fit_intercept
         self.c_tuning = c_tuning
         self.c_coupling = c_coupling
         if (self.c_tuning == 0) and (self.c_coupling == 0):
@@ -102,35 +108,6 @@ class TCSolver():
         self.n_nonzero_coupling = self.a_mask.sum()
         self.n_nonzero_tuning = self.b_mask.sum()
 
-    def fit_ols(self):
-        """Fit Ordinary Least Squares to the data.
-
-        Returns
-        -------
-        a_hat : np.ndarray, shape (N,)
-            The fitted coupling parameters.
-        b_hat : nd-array, shape (M,)
-            The fitted tuning parameters.
-        """
-        # Apply masks to datasets
-        X = self.X[:, self.b_mask]
-        Y = self.Y[:, self.a_mask]
-        # Form total design matrix
-        Z = np.concatenate((X, Y), axis=1)
-        # Edge case when masks are empty
-        if Z.shape[1] == 0:
-            self.a = np.zeros(self.N)
-            self.b = np.zeros(self.M)
-            return self
-        # Perform OLS fit
-        ols = LinearRegression(fit_intercept=False)
-        ols.fit(Z, self.y.ravel())
-        # Extract fits into class variables
-        b_est, a_est = np.split(ols.coef_, [self.n_nonzero_tuning])
-        self.a[self.a_mask] = a_est
-        self.b[self.b_mask] = b_est
-        return self
-
     def fit(self, refit=False, solver=None, verbose=False):
         """Fit a tuning and coupling model to the data.
 
@@ -171,7 +148,7 @@ class TCSolver():
             # Make sure we have selected some parameters
             if Z.shape[1] > 0:
                 # Perform OLS fit
-                ols = LinearRegression(fit_intercept=self.fit_intercept)
+                ols = LinearRegression(fit_intercept=False)
                 ols.fit(Z, self.y.ravel())
                 # Extract fits into class variables
                 b_est, a_est = np.split(ols.coef_, [self.n_nonzero_tuning])
@@ -198,10 +175,10 @@ class TCSolver():
                     tol=self.tol).fit(Zpr, self.y.ravel())
                 # Rescale coefficients back
                 b, a = np.split(lambdas @ solver.coef_, [self.M])
-            # Tuning is not penalized, coupling is
+            # Tuning is not penalized, coupling is penalized
             elif self.c_tuning == 0 and self.c_coupling != 0:
                 # Non-penalized design matrix
-                Xnp = np.insert(self.X, 0, np.ones(self.D), axis=1)
+                Xnp = self.X.copy()
                 # Penalized design matrix
                 Xp = self.Y.copy()
                 # Projection matrix for non-penalized design matrix
@@ -225,7 +202,7 @@ class TCSolver():
                         max_iter=self.max_iter,
                         tol=self.tol).fit(Xp_, y_.ravel())
                 np_fitter = LinearRegression(fit_intercept=False)
-                np_fitter.fit(Xnp, self.y - Xp @ p_fitter.coef_)
+                np_fitter.fit(Xnp, self.y.ravel() - Xp @ p_fitter.coef_)
                 a = p_fitter.coef_
                 b = np_fitter.coef_
 
@@ -288,6 +265,10 @@ class TCSolver():
         self.a = a
         self.b = b
         self.set_masks(a_mask=self.a != 0, b_mask=self.b != 0)
+        if self.fit_intercept:
+            self.intercept = (self.y_mean
+                              - self.X_mean @ self.b
+                              - self.Y_mean @ self.a).item()
         # Perform a refitting using OLS, if necessary
         if refit:
             return self.fit(solver='ols')
