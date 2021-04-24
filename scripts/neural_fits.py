@@ -8,14 +8,14 @@ from sklearn.model_selection import StratifiedKFold
 
 def main(args):
     # Check random state
-    if args.rng == -1:
-        rng = None
+    if args.cv_rng == -1:
+        cv_rng = None
     else:
-        rng = args.rng
-    if args.rng == -1:
+        cv_rng = args.cv_rng
+    if args.fitter_rng == -1:
         fitter_rng = None
     else:
-        fitter_rng = args.rng
+        fitter_rng = args.fitter_rng
     model = args.model
     dataset = args.dataset
     data_path = args.data_path
@@ -24,7 +24,8 @@ def main(args):
     n_folds = args.n_folds
     cv_verbose = args.cv_verbose
     # Get fitting object
-    fitter = analysis.get_fitter(**vars(args))
+    if model == 't' or model == 'c':
+        fitter = analysis.get_fitter(**vars(args))
 
     # Get dataset
     X, Y, class_labels, pack = analysis.import_data(
@@ -42,7 +43,7 @@ def main(args):
     skfolds = StratifiedKFold(
         n_splits=args.n_folds,
         shuffle=True,
-        random_state=rng)
+        random_state=cv_rng)
     train_folds = {}
     test_folds = {}
 
@@ -129,7 +130,16 @@ def main(args):
             results['Y'] = Y
         if 'class_labels' not in list(results):
             results['class_labels'] = class_labels
-
+        # Write train and test indices
+        if 'train_idx' not in list(results):
+            train_group = results.create_group('train_idx')
+            for key, val in train_folds.items():
+                train_group[key] = val
+        if 'test_idx' not in list(results):
+            test_group = results.create_group('test_idx')
+            for key, val in test_folds.items():
+                test_group[key] = val
+        # Data specific
         group = results.create_group(write_group)
         group['intercepts'] = intercepts
         if model == 't':
@@ -149,29 +159,30 @@ def main(args):
         group.attrs['model'] = model
         group.attrs['dataset'] = dataset
         group.attrs['n_folds'] = n_folds
-        group.attrs['fitter'] = args.fit
-        # Write train and test indices
-        train_group = group.create_group('train_idx')
-        for key, val in train_folds.items():
-            train_group[key] = val
-        test_group = group.create_group('test_idx')
-        for key, val in test_folds.items():
-            test_group[key] = val
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run a tuning or coupling fit on data.')
-    parser.add_argument('--model', choices=['t', 'c'])
+    parser.add_argument('--model', choices=['t', 'c', 'tc'])
     parser.add_argument('--dataset', choices=['pvc11', 'ecog'])
     parser.add_argument('--data_path')
     parser.add_argument('--write_path')
     parser.add_argument('--write_group')
     parser.add_argument('--fit', choices=['ols', 'lasso'])
     parser.add_argument('--n_folds', type=int, default=5)
-    parser.add_argument('--rng', type=int, default=-1)
+    parser.add_argument('--cv_rng', type=int, default=-1)
+    parser.add_argument('--fitter_rng', type=int, default=-1)
     # Data arguments
     parser.add_argument('--n_gaussians', type=int, default=7)
     parser.add_argument('--transform', default=None)
+    # Optimization arguments
+    parser.add_argument('--solver')
+    parser.add_argument('--c_tuning', type=float, default=0.)
+    parser.add_argument('--c_coupling', default='cv')
+    parser.add_argument('--initialization', default='random')
+    parser.add_argument('--max_iter', type=int, default=5000)
+    parser.add_argument('--tol', type=float, default=1e-4)
+    parser.add_argument('--refit', action='store_true')
     # Other arguments
     parser.add_argument('--cv_verbose', action='store_true')
     args = parser.parse_args()
