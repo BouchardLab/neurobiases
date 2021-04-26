@@ -81,7 +81,7 @@ class EMSolver():
         Psi_transform='softplus', c_tuning=0., c_coupling=0.,
         solver='scipy_lbfgs', fit_intercept=False, max_iter=1000, tol=1e-4,
         penalize_B=False, initialization='zeros', fista_max_iter=250,
-        fista_lr=1e-6, rng=None, fa_rng=None, init_vars=1.
+        fista_lr=1e-6, rng=None, fa_rng=None, init_params={}
     ):
         # Neural data
         self.X = X
@@ -120,7 +120,7 @@ class EMSolver():
         self.set_masks(a_mask=a_mask, b_mask=b_mask, B_mask=B_mask)
         # Initialize parameter estimates
         self.initialization = initialization
-        self.init_vars = init_vars
+        self.init_params = init_params
         self._init_params(initialization)
         # Initialize non-target tuning parameters
         self.freeze_B(B=B)
@@ -141,21 +141,35 @@ class EMSolver():
         elif initialization == 'random':
             # Coupling parameters
             coupling_mask = self.a_mask.ravel().astype('bool')
-            self.a = self.rng.normal(loc=0., scale=self.init_vars, size=(self.N, 1))
+            self.a = self.rng.normal(
+                loc=self.init_params.get('a_loc', 0.),
+                scale=self.init_params.get('a_scale', 1.),
+                size=(self.N, 1))
             self.a[np.invert(coupling_mask), 0] = 0.
             # Tuning parameters
             tuning_mask = self.b_mask.ravel().astype('bool')
-            self.b = self.rng.normal(loc=0., scale=self.init_vars, size=(self.M, 1))
+            self.b = self.rng.normal(
+                loc=self.init_params.get('b_loc', 0.),
+                scale=self.init_params.get('b_scale', 1.),
+                size=(self.M, 1))
             self.b[np.invert(tuning_mask), 0] = 0.
             # Non-target tuning parameters
             self.B = np.zeros((self.M, self.N))
             for neuron in range(self.N):
                 current_mask = self.B_mask[:, neuron].astype('bool')
-                self.B[:, neuron][current_mask] = \
-                    self.rng.normal(loc=0., scale=self.init_vars, size=(current_mask.sum()))
+                self.B[:, neuron][current_mask] = self.rng.normal(
+                    loc=self.init_params.get('B_loc', 0.),
+                    scale=self.init_params.get('B_scale', 1.),
+                    size=(current_mask.sum()))
             # Noise parameters
-            self.Psi_tr = self.rng.normal(loc=0., scale=self.init_vars, size=(self.N + 1))
-            self.L = self.rng.normal(loc=0., scale=0.1, size=(self.K, self.N + 1))
+            self.Psi_tr = self.rng.normal(
+                loc=self.init_params.get('Psi_tr_loc', 0.),
+                scale=self.init_params.get('Psi_tr_scale', 1.),
+                size=(self.N + 1))
+            self.L = self.rng.normal(
+                loc=self.init_params.get('L_loc', 0.),
+                scale=self.init_params.get('L_scale', 0.1),
+                size=(self.K, self.N + 1))
 
         elif initialization == 'fits':
             # initialize parameter estimates via fits
