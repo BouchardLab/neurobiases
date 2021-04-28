@@ -484,10 +484,34 @@ class EMSolver():
         copy : EMSolver object
             A copy of the current object, with matching parameters and masks.
         """
-        copy = EMSolver(X=self.X, Y=self.Y, y=self.y, K=self.K,
-                        a_mask=self.a_mask, b_mask=self.b_mask, B_mask=self.B_mask)
-        copy.set_params(a=self.a, b=self.b, B=self.B,
-                        Psi_tr=self.Psi_tr, L=self.L)
+        copy = EMSolver(
+            X=self.X,
+            Y=self.Y,
+            y=self.y,
+            K=self.K,
+            a_mask=self.a_mask,
+            b_mask=self.b_mask,
+            B_mask=self.B_mask,
+            Psi_transform=self.Psi_transform,
+            c_tuning=self.c_tuning,
+            c_coupling=self.c_coupling,
+            solver=self.solver,
+            fit_intercept=self.fit_intercept,
+            max_iter=self.max_iter,
+            tol=self.tol,
+            penalize_B=self.penalize_B,
+            initialization=self.initialization,
+            fista_max_iter=self.fista_max_iter,
+            fista_lr=self.fista_lr,
+            rng=self.rng,
+            fa_rng=self.fa_rng,
+            init_params=self.init_params)
+        copy.set_params(
+            a=self.a,
+            b=self.b,
+            B=self.B,
+            Psi_tr=self.Psi_tr,
+            L=self.L)
         return copy
 
     def Psi_tr_to_Psi(self, Psi_tr=None):
