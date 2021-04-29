@@ -139,7 +139,9 @@ def Psi_tr_to_Psi(Psi_tr, transform):
     Psi : np.ndarray
         The original Psi.
     """
-    if transform == 'softplus':
+    if transform is None:
+        Psi = Psi_tr
+    elif transform == 'softplus':
         if isinstance(Psi_tr, np.ndarray):
             Psi = np.logaddexp(0., Psi_tr)
         elif isinstance(Psi_tr, torch.Tensor):
@@ -173,7 +175,9 @@ def Psi_grad_to_Psi_tr_grad(Psi_grad, Psi_tr, transform):
     Psi_tr_grad : np.ndarray
         Grad wrt Psi_tr.
     """
-    if transform == 'softplus':
+    if transform is None:
+        Psi_tr_grad = Psi_grad
+    elif transform == 'softplus':
         if isinstance(Psi_grad, np.ndarray):
             Psi_tr_grad = expit(Psi_tr) * Psi_grad
         elif isinstance(Psi_grad, torch.Tensor):
@@ -205,7 +209,9 @@ def Psi_to_Psi_tr(Psi, transform):
     Psi_tr : np.ndarray
         Transfored Psi.
     """
-    if transform == 'softplus':
+    if transform is None:
+        Psi_tr = Psi
+    elif transform == 'softplus':
         if isinstance(Psi, np.ndarray):
             Psi_tr = inv_softplus(Psi)
         elif isinstance(Psi, torch.Tensor):

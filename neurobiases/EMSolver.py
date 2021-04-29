@@ -102,6 +102,14 @@ class EMSolver():
 
         # Optimization settings
         self.Psi_transform = Psi_transform
+        # If no Psi transform, create bounds for LBFGS
+        if Psi_transform is None:
+            self.bounds = \
+                [(None, None)] * (self.M + self.N + self.M * self.N) + \
+                [(1e-5, None)] * (self.N + 1) + \
+                [(None, None)] * self.K * (self.N + 1)
+        else:
+            self.bounds = None
         self.solver = solver
         self.max_iter = max_iter
         self.tol = tol
@@ -162,10 +170,15 @@ class EMSolver():
                     scale=self.init_params.get('B_scale', 1.),
                     size=(current_mask.sum()))
             # Noise parameters
-            self.Psi_tr = self.rng.normal(
-                loc=self.init_params.get('Psi_tr_loc', 0.),
-                scale=self.init_params.get('Psi_tr_scale', 1.),
-                size=(self.N + 1))
+            if self.Psi_transform is None:
+                self.Psi_tr = self.rng.exponential(
+                    scale=self.init_params.get('Psi_tr_scale', 1.),
+                    size=(self.N + 1))
+            else:
+                self.Psi_tr = self.rng.normal(
+                    loc=self.init_params.get('Psi_tr_loc', 0.),
+                    scale=self.init_params.get('Psi_tr_scale', 1.),
+                    size=(self.N + 1))
             self.L = self.rng.normal(
                 loc=self.init_params.get('L_loc', 0.),
                 scale=self.init_params.get('L_scale', 0.1),
@@ -871,6 +884,7 @@ class EMSolver():
                       index,
                       all_params),
                 callback=callback,
+                bounds=self.bounds,
                 jac=True)
             # extract optimized parameters
             if isinstance(index, tuple):
@@ -1201,6 +1215,7 @@ class EMSolver():
                   self.train_B, self.train_L, self.train_L_nt,
                   self.train_Psi_tr_nt, self.train_Psi_tr, self.Psi_transform),
             callback=callback,
+            bounds=self.bounds,
             jac=True)
         params = optimize.x
         self.a, self.b, self.B, self.Psi_tr, self.L = self.split_params(params)
@@ -1288,6 +1303,7 @@ class EMSolver():
             method='L-BFGS-B',
             args=(constraint, l_t, L_nt, Psi_t, Psi_nt,
                   self.a, self.b, self.B, a_mask, b_mask),
+            bounds=self.bounds,
             jac=True)
 
         delta = optimize.x[..., np.newaxis]
@@ -1321,6 +1337,7 @@ class EMSolver():
             self.f_df_oracle, x0=np.ones(self.K),
             method='L-BFGS-B',
             args=(L_nt, Psi_nt, self.a, self.b, self.B, a_true, b_true),
+            bounds=self.bounds,
             jac=True)
 
         delta = optimize.x[..., np.newaxis]
