@@ -143,6 +143,8 @@ def main(args):
                         params.attrs['criterion'] = args.criterion
                         params.attrs['cv'] = args.cv
                         params.attrs['fine_sweep_frac'] = args.fine_sweep_frac
+                        params.attrs['n_coupling_lambdas_fine'] = args.n_coupling_lambdas_fine
+                        params.attrs['n_tuning_lambdas_fine'] = args.n_tuning_lambdas_fine
                         params.attrs['solver'] = args.solver
                         params.attrs['initialization'] = args.initialization
                         params.attrs['max_iter'] = args.max_iter
@@ -206,9 +208,11 @@ if __name__ == '__main__':
     parser.add_argument('--tuning_loc_max', type=float, default=2)
     # CV fitting hyperparameters
     parser.add_argument('--n_coupling_lambdas', type=int, default=25)
+    parser.add_argument('--n_coupling_lambdas_fine', type=int, default=10)
     parser.add_argument('--coupling_lambda_lower', type=float, default=-7)
     parser.add_argument('--coupling_lambda_upper', type=float, default=-2)
     parser.add_argument('--n_tuning_lambdas', type=int, default=25)
+    parser.add_argument('--n_tuning_lambdas_fine', type=int, default=10)
     parser.add_argument('--tuning_lambda_lower', type=float, default=-7)
     parser.add_argument('--tuning_lambda_upper', type=float, default=-2)
     parser.add_argument('--fine_sweep_frac', type=float, default=0.1)

@@ -99,7 +99,8 @@ def cv_sparse_solver_single(
 
     # Create storage arrays
     if method == 'em':
-        mlls = np.zeros(n_tasks)
+        scores_train = np.zeros(n_tasks)
+        scores_test = np.zeros(n_tasks)
         aics = np.zeros(n_tasks)
         bics = np.zeros(n_tasks)
         a_est = np.zeros((n_tasks, N))
@@ -108,14 +109,10 @@ def cv_sparse_solver_single(
         Psi_est = np.zeros((n_tasks, N + 1))
         L_est = np.zeros((n_tasks, Ks.max(), N + 1))
     elif method == 'itsfa':
-        mses = np.zeros(n_tasks)
-        aics = np.zeros(n_tasks)
-        bics = np.zeros(n_tasks)
-        a_est = np.zeros((n_tasks, N))
-        b_est = np.zeros((n_tasks, M))
-        B_est = np.zeros((n_tasks, M, N))
+        raise NotImplementedError()
     elif method == 'tc':
-        mses = np.zeros(n_tasks)
+        scores_train = np.zeros(n_tasks)
+        scores_test = np.zeros(n_tasks)
         aics = np.zeros(n_tasks)
         bics = np.zeros(n_tasks)
         a_est = np.zeros((n_tasks, N))
@@ -169,7 +166,8 @@ def cv_sparse_solver_single(
             Psi_est[task_idx] = fitter.Psi_tr_to_Psi()
             L_est[task_idx, :int(K_cv), :] = fitter.L
             # Score the resulting fit
-            mlls[task_idx] = fitter.marginal_log_likelihood(
+            scores_train[task_idx] = fitter.marginal_log_likelihood()
+            scores_test[task_idx] = fitter.marginal_log_likelihood(
                 X=X_test,
                 Y=Y_test,
                 y=y_test)
@@ -196,7 +194,8 @@ def cv_sparse_solver_single(
             a_est[task_idx] = fitter.a.ravel()
             b_est[task_idx] = fitter.b.ravel()
             # Score the resulting fit
-            mses[task_idx] = fitter.mse(X=X_test, Y=Y_test, y=y_test)
+            scores_train[task_idx] = fitter.mse()
+            scores_test[task_idx] = fitter.mse(X=X_test, Y=Y_test, y=y_test)
             # Calculate ICs
             aics[task_idx] = fitter.aic()
             bics[task_idx] = fitter.bic()
@@ -212,7 +211,8 @@ def cv_sparse_solver_single(
     if comm is not None:
         # Gather tasks across all storage arrays
         if method == 'em':
-            mlls = Gatherv_rows(mlls, comm)
+            scores_train = Gatherv_rows(scores_train, comm)
+            scores_test = Gatherv_rows(scores_test, comm)
             aics = Gatherv_rows(aics, comm)
             bics = Gatherv_rows(bics, comm)
             a_est = Gatherv_rows(a_est, comm)
@@ -223,7 +223,8 @@ def cv_sparse_solver_single(
         elif method == 'itsfa':
             raise NotImplementedError()
         elif method == 'tc':
-            mses = Gatherv_rows(mses, comm)
+            scores_train = Gatherv_rows(scores_train, comm)
+            scores_test = Gatherv_rows(scores_test, comm)
             aics = Gatherv_rows(aics, comm)
             bics = Gatherv_rows(bics, comm)
             a_est = Gatherv_rows(a_est, comm)
@@ -235,7 +236,6 @@ def cv_sparse_solver_single(
                            tuning_lambdas.size,
                            Ks.size,
                            splits.size]
-                mlls.shape = reshape
                 B_est.shape = reshape + [M, N]
                 Psi_est.shape = reshape + [-1]
                 L_est.shape = reshape + [Ks.max(), N + 1]
@@ -245,18 +245,19 @@ def cv_sparse_solver_single(
                 reshape = [coupling_lambdas.size,
                            tuning_lambdas.size,
                            splits.size]
-                mses.shape = reshape
+            scores_train.shape = reshape
+            scores_test.shape = reshape
             a_est.shape = reshape + [-1]
             b_est.shape = reshape + [-1]
             aics.shape = reshape
             bics.shape = reshape
 
     if method == 'em':
-        return mlls, aics, bics, a_est, b_est, B_est, Psi_est, L_est
+        return scores_train, scores_test, aics, bics, a_est, b_est, B_est, Psi_est, L_est
     elif method == 'itsfa':
-        return mses, aics, bics, a_est, b_est, B_est
+        return scores_train, scores_test, aics, bics, a_est, b_est, B_est
     elif method == 'tc':
-        return mses, aics, bics, a_est, b_est
+        return scores_train, scores_test, aics, bics, a_est, b_est
 
 
 def cv_solver_full(

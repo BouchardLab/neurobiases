@@ -49,8 +49,10 @@ def main(args):
         Ks = params['Ks'][:]
         coupling_lambdas = params['coupling_lambdas'][:]
         n_coupling_lambdas = coupling_lambdas.size
+        n_coupling_lambdas_fine = params.attrs['n_coupling_lambdas_fine']
         tuning_lambdas = params['tuning_lambdas'][:]
         n_tuning_lambdas = tuning_lambdas.size
+        n_tuning_lambdas_fine = params.attrs['n_tuning_lambdas_fine']
         # Training settings
         criterion = params.attrs['criterion']
         cv = params.attrs['cv']
@@ -115,16 +117,17 @@ def main(args):
 
     if rank == 0:
         if model_fit == 'em':
-            scores, aics, bics, a_est, b_est, B_est, Psi_est, L_est = coarse_sweep_results
+            scores_train, scores_test, aics, bics, a_est, b_est, B_est, Psi_est, L_est = \
+                coarse_sweep_results
         elif model_fit == 'tc':
-            scores, aics, bics, a_est, b_est = coarse_sweep_results
+            scores_train, scores_test, aics, bics, a_est, b_est = coarse_sweep_results
         # Identify best hyperparameter set according to criterion
         if criterion == 'aic':
             median_criterion = np.median(aics, axis=-1)
         elif criterion == 'bic':
             median_criterion = np.median(bics, axis=-1)
         elif criterion == 'score':
-            median_criterion = -np.median(scores, axis=-1)
+            median_criterion = -np.median(scores_test, axis=-1)
         else:
             raise ValueError('Incorrect criterion specified.')
         best_hyps = np.unravel_index(np.argmin(median_criterion), median_criterion.shape)
@@ -137,12 +140,12 @@ def main(args):
         coupling_lambda_upper = (1. / fine_sweep_frac) * best_c_coupling
         coupling_lambdas = np.linspace(coupling_lambda_lower,
                                        coupling_lambda_upper,
-                                       num=n_coupling_lambdas)
+                                       num=n_coupling_lambdas_fine)
         tuning_lambda_lower = fine_sweep_frac * best_c_tuning
         tuning_lambda_upper = (1. / fine_sweep_frac) * best_c_tuning
         tuning_lambdas = np.linspace(tuning_lambda_lower,
                                      tuning_lambda_upper,
-                                     num=n_tuning_lambdas)
+                                     num=n_tuning_lambdas_fine)
         # Save coarse results
         with h5py.File(file_path, 'a') as results:
             results['coupling_lambdas_fine'] = coupling_lambdas
@@ -150,7 +153,8 @@ def main(args):
             # Metrics
             results['aics_coarse'] = aics
             results['bics_coarse'] = bics
-            results['scores_coarse'] = scores
+            results['scores_train_coarse'] = scores_train
+            results['scores_test_coarse'] = scores_test
             # Estimated parameters
             results['a_est_coarse'] = a_est
             results['b_est_coarse'] = b_est
@@ -195,9 +199,10 @@ def main(args):
             mstep_verbose=args.mstep_verbose,
             fitter_rng=fitter_rng)
     if model_fit == 'em':
-        scores, aics, bics, a_est, b_est, B_est, Psi_est, L_est = fine_sweep_results
+        scores_train, scores_test, aics, bics, a_est, b_est, B_est, Psi_est, L_est = \
+            fine_sweep_results
     elif model_fit == 'tc':
-        scores, aics, bics, a_est, b_est = fine_sweep_results
+        scores_train, scores_test, aics, bics, a_est, b_est = fine_sweep_results
 
     if rank == 0:
         # Get best overall fit
@@ -206,7 +211,7 @@ def main(args):
         elif criterion == 'bic':
             median_criterion = np.median(bics, axis=-1)
         elif criterion == 'score':
-            median_criterion = -np.median(scores, axis=-1)
+            median_criterion = -np.median(scores_test, axis=-1)
         else:
             raise ValueError('Incorrect criterion specified.')
         best_hyps = np.unravel_index(np.argmin(median_criterion), median_criterion.shape)
@@ -223,8 +228,9 @@ def main(args):
             results['aics_best'] = np.squeeze(aics[best_hyps])
             results['bics_fine'] = bics
             results['bics_best'] = np.squeeze(bics[best_hyps])
-            results['scores_fine'] = scores
-            results['scores_best'] = np.squeeze(scores[best_hyps])
+            results['scores_train_fine'] = scores_train
+            results['scores_test_fine'] = scores_test
+            results['scores_best'] = np.squeeze(scores_test[best_hyps])
             # True parameters
             results['a_true'] = tm.a.ravel()
             results['b_true'] = tm.b.ravel()
