@@ -106,6 +106,7 @@ def main(args):
             cv=cv,
             solver=solver,
             initialization=initialization,
+            numpy=args.numpy,
             max_iter=max_iter,
             tol=tol,
             refit=True,
