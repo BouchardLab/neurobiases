@@ -61,6 +61,8 @@ def main(args):
         initialization = params.attrs['initialization']
         max_iter = params.attrs['max_iter']
         tol = params.attrs['tol']
+        Psi_transform = params.attrs['Psi_transform']
+        numpy = params.attrs['numpy']
 
     # MPI communicator
     comm = MPI.COMM_WORLD
@@ -106,9 +108,10 @@ def main(args):
             cv=cv,
             solver=solver,
             initialization=initialization,
-            numpy=args.numpy,
+            numpy=numpy,
             max_iter=max_iter,
             tol=tol,
+            Psi_transform=Psi_transform,
             refit=True,
             comm=comm,
             cv_verbose=args.cv_verbose,
@@ -190,9 +193,10 @@ def main(args):
             cv=cv,
             solver=solver,
             initialization=initialization,
-            numpy=args.numpy,
+            numpy=numpy,
             max_iter=max_iter,
             tol=tol,
+            Psi_transform=Psi_transform,
             refit=True,
             comm=comm,
             cv_verbose=args.cv_verbose,
@@ -279,7 +283,6 @@ if __name__ == '__main__':
     parser.add_argument('--cv_verbose', action='store_true')
     parser.add_argument('--fitter_verbose', action='store_true')
     parser.add_argument('--mstep_verbose', action='store_true')
-    parser.add_argument('--numpy', action='store_true')
     parser.add_argument('--warn', action='store_true')
     args = parser.parse_args()
 

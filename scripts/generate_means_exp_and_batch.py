@@ -149,16 +149,15 @@ def main(args):
                         params.attrs['initialization'] = args.initialization
                         params.attrs['max_iter'] = args.max_iter
                         params.attrs['tol'] = args.tol
+                        params.attrs['Psi_transform'] = args.Psi_transform
+                        params.attrs['numpy'] = args.numpy
                     # Create SBATCH command
                     command = (
                         f"srun -N {n_nodes_per_job} -n {n_tasks} "
                         "-c $OMP_NUM_THREADS shifter python "
                         f"{script_path} --file_path={save_path} "
-                        f"--model_fit={model_fit} "
+                        f"--model_fit={model_fit} &\n"
                     )
-                    if args.numpy:
-                        command += "--numpy "
-                    command += "&\n"
 
                     # If we have reset the job counter, create a new batch script
                     if job_counter == 0:
@@ -236,6 +235,7 @@ if __name__ == '__main__':
     parser.add_argument('--initialization', default='fits')
     parser.add_argument('--max_iter', type=int, default=500)
     parser.add_argument('--tol', type=float, default=1e-8)
+    parser.add_argument('--Psi_transform', type=str, default='softplus')
     parser.add_argument('--numpy', action='store_true')
     # Random seeds
     parser.add_argument('--coupling_rng', type=int, default=-1)
