@@ -307,3 +307,25 @@ def tuning_and_coupling_fit(
         return intercepts, coupling_coefs, tuning_coefs, train_scores, test_scores, bics
     else:
         return intercepts, coupling_coefs, tuning_coefs, train_scores, bics
+
+
+def coupling_coefs_to_weight_matrix(coupling_coefs):
+    """Converts a set of coupling coefficients to a weight matrix.
+
+    Parameters
+    ----------
+    coupling_coefs : np.array
+        The set of coupling coefficients.
+
+    Returns
+    -------
+    weight_matrix : np.array
+        A weight matrix, with self connections inputted.
+    """
+    n_units = coupling_coefs.shape[0]
+    weight_matrix = np.zeros((n_units, n_units))
+
+    for unit in range(n_units):
+        weight_matrix[unit] = np.insert(coupling_coefs[unit], unit, 0)
+
+    return weight_matrix
