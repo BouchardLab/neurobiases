@@ -99,6 +99,7 @@ class EMSolver():
         self.K = K
         self.D, self.M = self.X.shape
         self.N = self.Y.shape[1]
+        self.n_params = self.N + self.M + self.N * self.M + self.N + 1 + self.K * (self.N + 1)
 
         # Optimization settings
         self.Psi_transform = Psi_transform
@@ -917,9 +918,9 @@ class EMSolver():
                             (storage['b'],
                              np.zeros((10000, self.M))),
                             axis=0)
-                        storage['Psi'] = np.concatenate(
-                            (storage['Psi'],
-                             np.zeros((10000, self.N + 1))),
+                        storage['params'] = np.concatenate(
+                            (storage['params'],
+                             np.zeros((10000, self.n_params))),
                             axis=0)
                     # Include most recent parameter estimates in arrays
                     storage['n_iterations'][k-1] = 1
@@ -945,9 +946,7 @@ class EMSolver():
                     )
                     storage['a'][k-1] = x[:self.N]
                     storage['b'][k-1] = x[self.N:self.N+self.M]
-                    Psi_idx = self.N + self.M + self.N * self.M
-                    Psi_tr = x[Psi_idx:Psi_idx + self.N + 1]
-                    storage['Psi'][k-1] = self.Psi_tr_to_Psi(Psi_tr)
+                    storage['params'][k-1] = np.copy(x)
             elif verbose:
                 # create callback function
                 def progress(x, g, fx, xnorm, gnorm, step, k, num_eval, *args):
@@ -1007,9 +1006,10 @@ class EMSolver():
                 storage['n_iterations'] = np.zeros(10000, dtype=np.int64)
                 storage['a'] = np.zeros((10000, self.N))
                 storage['b'] = np.zeros((10000, self.M))
-                storage['Psi'] = np.zeros((10000, self.N + 1))
+                storage['params'] = np.zeros((10000, self.n_params))
             else:
                 storage = None
+
             if numpy:
                 solver = self.f_df_em_owlbfgs
             else:
@@ -1033,7 +1033,10 @@ class EMSolver():
                       tuning_to_coupling_ratio,
                       self.penalize_B,
                       self.Psi_transform,
-                      storage),
+                      False,
+                      storage,
+                      False,
+                      None),
                 progress=progress,
                 orthantwise_c=c,
                 orthantwise_start=orthantwise_start,
@@ -1050,45 +1053,6 @@ class EMSolver():
                                      Psi_tr.ravel(),
                                      L.ravel()))
 
-        # Use the FISTA solver (sparse)
-        elif self.solver == 'fista':
-            zero_start = -1
-            zero_end = -1
-            one_start = -1
-            one_end = -1
-            if self.c_coupling > 0.:
-                zero_start = 0
-                zero_end = self.N
-            if self.c_tuning > 0.:
-                one_start = self.N
-                one_end = self.N + self.M + self.N * self.M
-            args = (self.X,
-                    self.Y,
-                    self.y,
-                    self.a_mask,
-                    self.b_mask,
-                    self.B_mask,
-                    self.train_B,
-                    self.train_L_nt,
-                    self.train_L,
-                    self.train_Psi_tr_nt,
-                    self.train_Psi_tr,
-                    mu,
-                    zz,
-                    sigma,
-                    1.)
-            params = utils.fista(self.f_df_em,
-                                 params,
-                                 lr=self.fista_lr,
-                                 max_iter=self.fista_max_iter,
-                                 C0=self.c_coupling,
-                                 C1=self.c_tuning,
-                                 zero_start=zero_start,
-                                 zero_end=zero_end,
-                                 one_start=one_start,
-                                 one_end=one_end,
-                                 verbose=verbose,
-                                 args=args)
         else:
             raise ValueError(f"Solver {self.solver} not available.")
 
@@ -1131,7 +1095,7 @@ class EMSolver():
             ll_path = []
             a_path = []
             b_path = []
-            Psi_path = []
+            params_path = []
 
         # EM iteration loop: convergence if tolerance or maximum iterations
         # are reached
@@ -1151,7 +1115,7 @@ class EMSolver():
                 ll_path.append(storage['ll'][:n_steps])
                 a_path.append(storage['a'][:n_steps])
                 b_path.append(storage['b'][:n_steps])
-                Psi_path.append(storage['Psi'][:n_steps])
+                params_path.append(storage['params'][:n_steps])
 
             self.a, self.b, self.B, self.Psi_tr, self.L = self.split_params(params)
             iteration += 1
@@ -1171,7 +1135,7 @@ class EMSolver():
             self.ll_path = np.concatenate(ll_path, axis=0)
             self.a_path = np.concatenate(a_path, axis=0)
             self.b_path = np.concatenate(b_path, axis=0)
-            self.Psi_path = np.concatenate(Psi_path, axis=0)
+            self.params_path = np.concatenate(params_path, axis=0)
         if self.fit_intercept:
             self.B_intercept = (self.Y_mean - self.X_mean @ self.B).ravel()
             self.b_intercept = (self.y_mean
