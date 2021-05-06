@@ -946,7 +946,11 @@ class EMSolver():
                     )
                     storage['a'][k-1] = x[:self.N]
                     storage['b'][k-1] = x[self.N:self.N+self.M]
-                    storage['params'][k-1] = np.copy(x)
+                    Psi_idx = self.N + self.M + self.N * self.M
+                    Psi_tr = x[Psi_idx:Psi_idx + self.N + 1]
+                    params = np.copy(x)
+                    params[Psi_idx:Psi_idx + self.N + 1] = self.Psi_tr_to_Psi(Psi_tr)
+                    storage['params'][k-1] = params
             elif verbose:
                 # create callback function
                 def progress(x, g, fx, xnorm, gnorm, step, k, num_eval, *args):
