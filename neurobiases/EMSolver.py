@@ -1,10 +1,12 @@
 import numpy as np
 import torch
 
-from .lbfgs import fmin_lbfgs
+from .lbfgs import fmin_lbfgs, _minimize_lbfgsb as _minimize_lbfgsb_custom
+from scipy.optimize.lbfgsb import _minimize_lbfgsb
+
 from neurobiases import plot
 from neurobiases import em_utils as utils
-from scipy.optimize import minimize
+from scipy.optimize import _minimize
 from sklearn.decomposition import FactorAnalysis
 from sklearn.linear_model import LinearRegression
 
@@ -74,6 +76,9 @@ class EMSolver():
     fa_rng : Generator or int or None
         The random number generator, or seed, for the FactorAnalysis used in
         a specific initialization case ('fits').
+    save_hessian : bool
+        If True, saves the optimize result in `scipy_lbfgs` at every parameter
+        update.
     """
     def __init__(
         self, X, Y, y, K, a_mask=None, b_mask=None, B_mask=None,
@@ -81,7 +86,7 @@ class EMSolver():
         Psi_transform='softplus', c_tuning=0., c_coupling=0.,
         solver='scipy_lbfgs', fit_intercept=False, max_iter=1000, tol=1e-4,
         penalize_B=False, initialization='zeros', fista_max_iter=250,
-        fista_lr=1e-6, rng=None, fa_rng=None, init_params={}
+        fista_lr=1e-6, rng=None, fa_rng=None, init_params={}, save_hessian=False
     ):
         # Neural data
         self.X = X
@@ -130,6 +135,7 @@ class EMSolver():
         # Initialize parameter estimates
         self.initialization = initialization
         self.init_params = init_params
+        self.save_hessian = save_hessian
         self._init_params(initialization)
         # Initialize non-target tuning parameters
         self.freeze_B(B=B)
@@ -860,7 +866,11 @@ class EMSolver():
                 solver = self.f_df_em
             else:
                 solver = self._f_df_em
-            optimize = minimize(
+            if self.save_hessian:
+                _minimize._minimize_lbfgsb = _minimize_lbfgsb_custom
+            else:
+                _minimize._minimize_lbfgsb = _minimize_lbfgsb
+            optimize = _minimize.minimize(
                 solver, x0=params,
                 method='L-BFGS-B',
                 args=(self.X,
@@ -887,6 +897,9 @@ class EMSolver():
                 callback=callback,
                 bounds=self.bounds,
                 jac=True)
+            if self.save_hessian:
+                self.all_results = self.all_results + optimize
+                optimize = optimize[-1]
             # extract optimized parameters
             if isinstance(index, tuple):
                 params = all_params
@@ -1103,6 +1116,8 @@ class EMSolver():
 
         # EM iteration loop: convergence if tolerance or maximum iterations
         # are reached
+        if self.save_hessian:
+            self.all_results = []
         while (del_ml > self.tol) and (iteration < self.max_iter):
             # E-step, followed by M-step
             mu, zz, sigma = self.e_step()
@@ -1175,7 +1190,7 @@ class EMSolver():
         else:
             callback = None
 
-        optimize = minimize(
+        optimize = _minimize.minimize(
             self.f_df_ml, x0=params,
             method='L-BFGS-B',
             args=(self.X, self.Y, self.y, self.K,
@@ -1266,7 +1281,7 @@ class EMSolver():
         else:
             b_mask = b_mask.astype(self.b.dtype)
 
-        optimize = minimize(
+        optimize = _minimize.minimize(
             self.f_df_constraint, x0=np.zeros(self.K),
             method='L-BFGS-B',
             args=(constraint, l_t, L_nt, Psi_t, Psi_nt,
@@ -1301,7 +1316,7 @@ class EMSolver():
         Psi = self.Psi_tr_to_Psi(self.Psi_tr)
         Psi_nt = np.diag(Psi[1:])
 
-        optimize = minimize(
+        optimize = _minimize.minimize(
             self.f_df_oracle, x0=np.ones(self.K),
             method='L-BFGS-B',
             args=(L_nt, Psi_nt, self.a, self.b, self.B, a_true, b_true),
