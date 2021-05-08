@@ -1141,8 +1141,8 @@ class EMSolver():
             self.b_path = np.concatenate(b_path, axis=0)
             self.params_path = np.concatenate(params_path, axis=0)
         if self.fit_intercept:
-            self.B_intercept = (self.Y_mean - self.X_mean @ self.B).ravel()
-            self.b_intercept = (self.y_mean
+            self.Y_intercept = (self.Y_mean - self.X_mean @ self.B).ravel()
+            self.y_intercept = (self.y_mean
                                 - self.X_mean @ self.b
                                 - self.Y_mean @ self.a).item()
         # Perform re-estimation using sparse mask

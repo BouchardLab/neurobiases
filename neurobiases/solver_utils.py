@@ -262,6 +262,178 @@ def cv_sparse_solver_single(
         return scores_train, scores_test, aics, bics, a_est, b_est
 
 
+def cv_solver_oracle_selection(
+    X, Y, y, Ks, cv=5, a_mask=None, b_mask=None, solver='ow_lbfgs',
+    initialization='fits', max_iter=1000, tol=1e-4, Psi_transform='softplus',
+    refit=False, fitter_rng=None, numpy=False, comm=None, fit_intercept=False,
+    cv_verbose=False, fitter_verbose=False, mstep_verbose=False
+):
+    """Performs a cross-validated, sparse EM fit on the triangular model.
+
+    This function is parallelized with MPI. It parallelizes coupling, tuning,
+    and latent hyperparameters across cores. Fits across cross-validation folds
+    are performed within a core.
+
+    Parameters
+    ----------
+    X : np.ndarray, shape (D, M)
+        Design matrix for tuning features.
+    Y : np.ndarray, shape (D, N)
+        Design matrix for coupling features.
+    y : np.ndarray, shape (D, 1)
+        Neural response vector.
+    coupling_lambdas : np.ndarray
+        The coupling sparsity penalties to apply to the optimization.
+    tuning_lambdas : np.ndarray
+        The tuning sparsity penalties to apply to the optimization.
+    Ks : np.ndarray
+        The latent factors to iterate over.
+    cv : int, or cross-validation object
+        The number of cross-validation folds, if int. Can also be its own
+        cross-validator object.
+    solver : string
+        The sparse solver to use. Defaults to orthant-wise LBFGS.
+    max_iter : int
+        The maximum number of EM iterations.
+    tol : float
+        Convergence criteria for relative decrease in marginal log-likelihood.
+    random_state : random state object
+        Used for EM solver.
+    comm : MPI communicator
+        For MPI runs. If None, assumes that MPI is not used.
+    verbose : bool
+        If True, prints out updates during hyperparameter folds.
+
+    Returns
+    -------
+    mlls : np.ndarray
+        The marginal log-likelihood of the trained model on the held out data.
+    a : np.ndarray
+        The coupling parameters.
+    b : np.ndarray
+        The tuning parameters.
+    B : np.ndarray
+        The non-target tuning parameters.
+    Psi_tr : np.ndarray
+        The transformed private variances.
+    """
+    # Get dimensions
+    M = X.shape[1]
+    N = Y.shape[1]
+
+    # Handle MPI communicators
+    rank = 0
+    size = 1
+    if comm is not None:
+        from mpi_utils.ndarray import Gatherv_rows
+        rank = comm.rank
+        size = comm.size
+
+    # Get CV object
+    cv = check_cv(cv=cv)
+    n_splits = cv.get_n_splits()
+    splits = np.arange(n_splits)
+
+    # Assign tasks
+    hyperparameters = cartesian((Ks, splits))
+    tasks = np.array_split(hyperparameters, size)[rank]
+    n_tasks = len(tasks)
+
+    # Create storage arrays
+    scores_train = np.zeros(n_tasks)
+    scores_test = np.zeros(n_tasks)
+    aics = np.zeros(n_tasks)
+    bics = np.zeros(n_tasks)
+    a_est = np.zeros((n_tasks, N))
+    b_est = np.zeros((n_tasks, M))
+    B_est = np.zeros((n_tasks, M, N))
+    Psi_est = np.zeros((n_tasks, N + 1))
+    L_est = np.zeros((n_tasks, Ks.max(), N + 1))
+
+    # Iterate over tasks for this rank
+    for task_idx, (K_cv, split_idx) in enumerate(tasks):
+        # Pull out the indices for the current fold
+        train_idx, test_idx = list(cv.split(X))[int(split_idx)]
+        X_train = X[train_idx]
+        Y_train = Y[train_idx]
+        y_train = y[train_idx]
+        X_test = X[test_idx]
+        Y_test = Y[test_idx]
+        y_test = y[test_idx]
+
+        if cv_verbose:
+            t0 = time.time()
+
+        fitter = EMSolver(
+            X=X_train,
+            Y=Y_train,
+            y=y_train,
+            K=int(K_cv),
+            a_mask=a_mask,
+            b_mask=b_mask,
+            solver=solver,
+            initialization=initialization,
+            max_iter=max_iter,
+            tol=tol,
+            Psi_transform=Psi_transform,
+            c_tuning=0.,
+            c_coupling=0.,
+            rng=fitter_rng,
+            fa_rng=2332,
+            fit_intercept=fit_intercept).fit_em(
+                verbose=fitter_verbose,
+                mstep_verbose=mstep_verbose,
+                refit=refit,
+                numpy=numpy)
+        # Store parameter fits
+        a_est[task_idx] = fitter.a.ravel()
+        b_est[task_idx] = fitter.b.ravel()
+        B_est[task_idx] = fitter.B
+        Psi_est[task_idx] = fitter.Psi_tr_to_Psi()
+        L_est[task_idx, :int(K_cv), :] = fitter.L
+        # Score the resulting fit
+        scores_train[task_idx] = fitter.marginal_log_likelihood()
+        scores_test[task_idx] = fitter.marginal_log_likelihood(
+            X=X_test,
+            Y=Y_test,
+            y=y_test)
+        # Calculate ICs
+        aics[task_idx] = fitter.aic()
+        bics[task_idx] = fitter.bic()
+
+        if cv_verbose:
+            elapsed = time.time() - t0
+            print(f"Rank {rank}, task {task_idx+1}/{len(tasks)} complete. "
+                  f"Elapsed time: {elapsed:0.2f}. "
+                  f"Split idx: {split_idx}.")
+
+    if comm is not None:
+        # Gather tasks across all storage arrays
+        scores_train = Gatherv_rows(scores_train, comm)
+        scores_test = Gatherv_rows(scores_test, comm)
+        aics = Gatherv_rows(aics, comm)
+        bics = Gatherv_rows(bics, comm)
+        a_est = Gatherv_rows(a_est, comm)
+        b_est = Gatherv_rows(b_est, comm)
+        B_est = Gatherv_rows(B_est, comm)
+        Psi_est = Gatherv_rows(Psi_est, comm)
+        L_est = Gatherv_rows(L_est, comm)
+
+        if rank == 0:
+            reshape = [Ks.size, splits.size]
+            B_est.shape = reshape + [M, N]
+            Psi_est.shape = reshape + [-1]
+            L_est.shape = reshape + [Ks.max(), N + 1]
+            scores_train.shape = reshape
+            scores_test.shape = reshape
+            a_est.shape = reshape + [-1]
+            b_est.shape = reshape + [-1]
+            aics.shape = reshape
+            bics.shape = reshape
+
+    return scores_train, scores_test, aics, bics, a_est, b_est, B_est, Psi_est, L_est
+
+
 def cv_solver_full(
     method, selection, M, N, K, D, coupling_distribution,
     coupling_sparsities, coupling_locs, coupling_scale, coupling_rngs,
