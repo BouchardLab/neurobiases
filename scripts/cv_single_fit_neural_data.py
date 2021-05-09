@@ -60,7 +60,7 @@ def main(args):
     a_masks = Bcast_from_root(a_masks, comm)
     a_masks = a_masks != 0
 
-    for fold_idx in range(1):
+    for fold_idx in range(n_folds):
         if verbose and rank == 0:
             print(f'Fold {fold_idx+1}')
         # Extract train and test indices
@@ -75,7 +75,7 @@ def main(args):
             Y_all_test = Y_all[test_idx]
         X_train = Bcast_from_root(X_train, comm)
         # Iterate over neurons
-        for neuron in range(1):
+        for neuron in range(n_neurons):
             if verbose and rank == 0:
                 print(f'>>> Neuron {neuron}')
             Y_train = None
