@@ -19,6 +19,7 @@ def main(args):
     rank = comm.rank
 
     # Fit settings
+    save_group = args.save_group
     selection = args.selection
     K_max = args.K_max
     Ks = np.arange(1, K_max + 1)
@@ -53,12 +54,13 @@ def main(args):
         scores_train = np.zeros((n_folds, n_neurons))
         scores_test = np.zeros((n_folds, n_neurons))
         bics = np.zeros((n_folds, n_neurons))
+        best_Ks = np.zeros((n_folds, n_neurons))
     n_folds = comm.bcast(n_folds, root=0)
     n_neurons = comm.bcast(n_neurons, root=0)
     a_masks = Bcast_from_root(a_masks, comm)
     a_masks = a_masks != 0
 
-    for fold_idx in range(n_folds):
+    for fold_idx in range(1):
         if verbose and rank == 0:
             print(f'Fold {fold_idx+1}')
         # Extract train and test indices
@@ -73,7 +75,7 @@ def main(args):
             Y_all_test = Y_all[test_idx]
         X_train = Bcast_from_root(X_train, comm)
         # Iterate over neurons
-        for neuron in range(n_neurons):
+        for neuron in range(1):
             if verbose and rank == 0:
                 print(f'>>> Neuron {neuron}')
             Y_train = None
@@ -109,20 +111,21 @@ def main(args):
                 fitter_verbose=args.fitter_verbose,
                 mstep_verbose=args.mstep_verbose,
                 fitter_rng=9395062021)
-            # Choose best hyperparameter
-            if criterion == 'aic':
-                avg_criterion = np.mean(results[2], axis=-1)
-            elif criterion == 'bic':
-                avg_criterion = np.mean(results[3], axis=-1)
-            elif criterion == 'score':
-                avg_criterion = -np.mean(results[1], axis=-1)
-            else:
-                raise ValueError('Incorrect criterion specified.')
-            K = Ks[np.argmin(avg_criterion)]
 
             if rank == 0:
-                print(f"Refitting with K = {K}.")
+                # Choose best hyperparameter
+                if criterion == 'aic':
+                    avg_criterion = np.mean(results[2], axis=-1)
+                elif criterion == 'bic':
+                    avg_criterion = np.mean(results[3], axis=-1)
+                elif criterion == 'score':
+                    avg_criterion = -np.mean(results[1], axis=-1)
+                else:
+                    raise ValueError('Incorrect criterion specified.')
+                K = Ks[np.argmin(avg_criterion)]
+                best_Ks[fold_idx, neuron] = K
                 # Refit to entire dataset
+                print(f"Refitting with K = {K}.")
                 fitter = EMSolver(
                     X=X_train,
                     Y=Y_train,
@@ -150,10 +153,36 @@ def main(args):
                 )
                 bics[fold_idx, neuron] = fitter.bic()
 
+    if rank == 0:
+        with h5py.File(file_path, 'a') as params:
+            if save_group in params:
+                save = params[save_group]
+                save['intercepts'][:] = intercepts
+                save['coupling_coefs'][:] = coupling_coefs
+                save['tuning_coefs'][:] = tuning_coefs
+                save['Bs'][:] = Bs
+                save['Psis'][:] = Psis
+                save['scores_train'][:] = scores_train
+                save['scores_test'][:] = scores_test
+                save['bics'][:] = bics
+                save['best_Ks'][:] = best_Ks
+            else:
+                save = params.create_group(save_group)
+                save['intercepts'] = intercepts
+                save['coupling_coefs'] = coupling_coefs
+                save['tuning_coefs'] = tuning_coefs
+                save['Bs'] = Bs
+                save['Psis'] = Psis
+                save['scores_train'] = scores_train
+                save['scores_test'] = scores_test
+                save['bics'] = bics
+                save['best_Ks'] = best_Ks
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run CV solver on triangular model.')
     parser.add_argument('--file_path', type=str)
+    parser.add_argument('--save_group', type=str)
     parser.add_argument('--selection', type=str)
     parser.add_argument('--K_max', type=int, default=10)
     parser.add_argument('--criterion', type=str, default='bic')
