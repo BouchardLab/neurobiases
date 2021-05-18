@@ -6,7 +6,7 @@ from scipy.optimize.lbfgsb import _minimize_lbfgsb
 
 from neurobiases import plot
 from neurobiases import em_utils as utils
-from scipy.optimize import _minimize
+from scipy.optimize import _minimize, root
 from sklearn.decomposition import FactorAnalysis
 from sklearn.linear_model import LinearRegression
 
@@ -292,6 +292,12 @@ class EMSolver():
             self.Psi_tr = np.copy(Psi_tr.reshape(self.N + 1))
         if L is not None:
             self.L = np.copy(L.reshape((self.K, self.N + 1)))
+
+    def set_all_params(self, params, wrt_Psi=False):
+        a, b, B, Psi_tr, L = self.split_params(params)
+        if wrt_Psi:
+            Psi_tr = self.Psi_to_Psi_tr(Psi_tr)
+        self.set_params(a=a, b=b, B=B, Psi_tr=Psi_tr, L=L)
 
     def freeze_B(self, B=None):
         """Sets all (or a subset of) the non-target tuning parameters, and
@@ -1242,6 +1248,40 @@ class EMSolver():
         self.a = self.a + Delta
         self.b = self.b - np.dot(self.B, Delta)
         self.reset_masks()
+
+    def get_f_Psi_t(self):
+        """Returns a function that can find the roots for """
+        def f_psi_t(x):
+            if x.ndim == 1:
+                x = x[..., np.newaxis]
+            Psi = self.Psi_tr_to_Psi()
+            Psi_t = Psi[0]
+            Psi_nt = np.diag(Psi[1:])
+            l_t = self.L[:, 0][..., np.newaxis]
+            L_nt = self.L[:, 1:]
+            Delta = -np.linalg.solve(Psi_nt + np.dot(L_nt.T, L_nt),
+                                     np.dot(L_nt.T, x).ravel())[..., np.newaxis]
+            # Create augmented variables
+            delta_aug = x + np.dot(L_nt, Delta)
+            L_aug = l_t + np.dot(L_nt, self.a)
+
+            # Correction for target private variance
+            correction = \
+                - 2 * np.dot(Delta.T, np.dot(Psi_nt, self.a)).ravel() \
+                - np.dot(Delta.T, np.dot(Psi_nt, Delta)).ravel() \
+                - np.dot(delta_aug.T, delta_aug) \
+                - 2 * np.dot(L_aug.T, delta_aug)
+            return (Psi_t+correction).item()
+        return f_psi_t
+
+    def get_delta_bounds(self, n_guesses=20, round=5, cutoff=1e-4):
+        f = self.get_f_Psi_t()
+        x0s = np.random.normal(size=n_guesses)
+        sols = np.zeros(n_guesses)
+        for idx, x0 in enumerate(x0s):
+            sols[idx] = root(f, x0, method='hybr').x
+        sols = np.unique(np.round(sols, round)) * (1 - 1e-4)
+        return sols
 
     def apply_identifiability_constraint(
         self, constraint, a_mask=None, b_mask=None
