@@ -613,3 +613,60 @@ def check_identifiability_conditions(Psi_nt, L_nt, B, a_mask, b_mask):
     if rank < K:
         return False
     return True
+
+
+def get_pvc11_tuning_modulation_and_preference(tuning_coefs, form='cosine2'):
+    """Extracts the tuning modulation and preference from a set
+    of tuning coefficients.
+
+    Parameters
+    ----------
+    tuning_coefs : nd-array, shape (n_neurons, n_features)
+        The coefficients describing the tuning of each neuron.
+    form : string
+        The type of design matrix used. Valid options are "angle",
+        "cosine", "cosine_speed", "one_hot", and "speed_hot".
+
+    Returns
+    -------
+    modulations : nd-array of floats
+        The modulation (min-to-max distance) for each neuron.
+    preferences : nd-array of floats
+        The preference (location of tuning maximum) for each neuron.
+    """
+    if tuning_coefs.ndim == 1:
+        tuning_coefs = tuning_coefs[np.newaxis]
+
+    if form == 'cosine':
+        # Splt up cosine coefficients
+        c1 = tuning_coefs[..., 0]
+        c2 = tuning_coefs[..., 1]
+        # Get preferences in degrees and restrict range to [0, 360)
+        preferences = np.arctan2(c2, c1) * (180/np.pi)
+        preferences[preferences < 0] += 360
+        preferences_rad = np.deg2rad(preferences)
+        # Calculate modulations
+        modulations = 2 * (c2 - c1) / (np.sin(preferences_rad) - np.cos(preferences_rad))
+
+    elif form == 'cosine2':
+        # Split up cosine coefficients
+        c1 = tuning_coefs[..., 0]
+        c2 = tuning_coefs[..., 1]
+        # Get preferences in degrees and restrict range to [0, 360)
+        preferences = np.arctan2(c2, c1) * (180/np.pi)
+        preferences[preferences < 0] += 360
+        preferences_rad = np.deg2rad(preferences)
+        # Ensure preference lies within [0, 180) due to the period
+        preferences = (preferences / 2) % 180
+        # Calculate modulations
+        modulations = 2 * (c2 - c1) / (np.sin(preferences_rad) - np.cos(preferences_rad))
+
+    elif form == 'one_hot':
+        preferences = 30 * np.argmax(tuning_coefs, axis=-1)
+        modulations = \
+            np.max(tuning_coefs, axis=-1) - np.min(tuning_coefs, axis=-1)
+
+    else:
+        raise ValueError('Form %s is not available.' % form)
+
+    return modulations, preferences
