@@ -150,7 +150,6 @@ def main(args):
                         params.attrs['max_iter'] = args.max_iter
                         params.attrs['tol'] = args.tol
                         params.attrs['Psi_transform'] = args.Psi_transform
-                        params.attrs['numpy'] = args.numpy
                     # Create SBATCH command
                     command = (
                         f"srun -N {n_nodes_per_job} -n {n_tasks} "
