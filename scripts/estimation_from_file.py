@@ -13,6 +13,7 @@ from sklearn.exceptions import ConvergenceWarning
 
 def main(args):
     verbose = args.verbose
+    model = args.model
     # Turn off convergence warning by default
     if not args.warn:
         warnings.filterwarnings('ignore', category=ConvergenceWarning)
@@ -51,9 +52,10 @@ def main(args):
         a_mask = Bcast_from_root(a_mask, comm=comm)
         b_mask = Bcast_from_root(b_mask, comm=comm)
 
-        scores_train, scores_test, aics, bics, a_est, b_est, B_est, Psi_est, L_est = \
+        results = \
             cv_solver_oracle_selection(
                 X=X, Y=Y, y=y,
+                model=model,
                 Ks=np.arange(1, args.max_K + 1),
                 cv=args.cv,
                 a_mask=a_mask,
@@ -67,6 +69,12 @@ def main(args):
                 numpy=False,
                 comm=comm,
                 fit_intercept=False)
+        if model == 'tm':
+            scores_train, scores_test, aics, bics, a_est, b_est, B_est, Psi_est, L_est = \
+                results
+        elif model == 'tc':
+            scores_train, scores_test, aics, bics, a_est, b_est = \
+                results
 
         if rank == 0:
             with h5py.File(path, 'a') as results:
@@ -77,14 +85,16 @@ def main(args):
                 group['bics'] = np.squeeze(bics)
                 group['a_est'] = np.squeeze(a_est)
                 group['b_est'] = np.squeeze(b_est)
-                group['B_est'] = np.squeeze(B_est)
-                group['Psi_est'] = np.squeeze(Psi_est)
-                group['L_est'] = np.squeeze(L_est)
+                if model == 'tm':
+                    group['B_est'] = np.squeeze(B_est)
+                    group['Psi_est'] = np.squeeze(Psi_est)
+                    group['L_est'] = np.squeeze(L_est)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--file_path', type=str)
+    parser.add_argument('--model', type=str)
     parser.add_argument('--a_mask_group', type=str)
     parser.add_argument('--b_mask_group', type=str)
     parser.add_argument('--results_group', type=str)

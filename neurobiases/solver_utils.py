@@ -263,10 +263,11 @@ def cv_sparse_solver_single(
 
 
 def cv_solver_oracle_selection(
-    X, Y, y, Ks, cv=5, a_mask=None, b_mask=None, solver='ow_lbfgs',
-    initialization='fits', max_iter=1000, tol=1e-4, Psi_transform='softplus',
-    refit=False, fitter_rng=None, numpy=False, comm=None, fit_intercept=False,
-    cv_verbose=False, fitter_verbose=False, mstep_verbose=False
+    X, Y, y, model='tm', Ks=np.array([1]), cv=5, a_mask=None, b_mask=None,
+    solver='ow_lbfgs', initialization='fits', max_iter=1000, tol=1e-4,
+    Psi_transform='softplus', refit=False, fitter_rng=None, numpy=False,
+    comm=None, fit_intercept=False, cv_verbose=False, fitter_verbose=False,
+    mstep_verbose=False
 ):
     """Performs a cross-validated, sparse EM fit on the triangular model.
 
@@ -363,43 +364,66 @@ def cv_solver_oracle_selection(
 
         if cv_verbose:
             t0 = time.time()
-
-        fitter = EMSolver(
-            X=X_train,
-            Y=Y_train,
-            y=y_train,
-            K=int(K_cv),
-            a_mask=a_mask,
-            b_mask=b_mask,
-            solver=solver,
-            initialization=initialization,
-            max_iter=max_iter,
-            tol=tol,
-            Psi_transform=Psi_transform,
-            c_tuning=0.,
-            c_coupling=0.,
-            rng=fitter_rng,
-            fa_rng=2332,
-            fit_intercept=fit_intercept).fit_em(
-                verbose=fitter_verbose,
-                mstep_verbose=mstep_verbose,
-                refit=refit,
-                numpy=numpy)
-        # Store parameter fits
-        a_est[task_idx] = fitter.a.ravel()
-        b_est[task_idx] = fitter.b.ravel()
-        B_est[task_idx] = fitter.B
-        Psi_est[task_idx] = fitter.Psi_tr_to_Psi()
-        L_est[task_idx, :int(K_cv), :] = fitter.L
-        # Score the resulting fit
-        scores_train[task_idx] = fitter.marginal_log_likelihood()
-        scores_test[task_idx] = fitter.marginal_log_likelihood(
-            X=X_test,
-            Y=Y_test,
-            y=y_test)
-        # Calculate ICs
-        aics[task_idx] = fitter.aic()
-        bics[task_idx] = fitter.bic()
+        if model == 'tm':
+            fitter = EMSolver(
+                X=X_train,
+                Y=Y_train,
+                y=y_train,
+                K=int(K_cv),
+                a_mask=a_mask,
+                b_mask=b_mask,
+                solver=solver,
+                initialization=initialization,
+                max_iter=max_iter,
+                tol=tol,
+                Psi_transform=Psi_transform,
+                c_tuning=0.,
+                c_coupling=0.,
+                rng=fitter_rng,
+                fa_rng=2332,
+                fit_intercept=fit_intercept).fit_em(
+                    verbose=fitter_verbose,
+                    mstep_verbose=mstep_verbose,
+                    refit=refit,
+                    numpy=numpy)
+            # Store parameter fits
+            a_est[task_idx] = fitter.a.ravel()
+            b_est[task_idx] = fitter.b.ravel()
+            B_est[task_idx] = fitter.B
+            Psi_est[task_idx] = fitter.Psi_tr_to_Psi()
+            L_est[task_idx, :int(K_cv), :] = fitter.L
+            # Score the resulting fit
+            scores_train[task_idx] = fitter.marginal_log_likelihood()
+            scores_test[task_idx] = fitter.marginal_log_likelihood(
+                X=X_test,
+                Y=Y_test,
+                y=y_test)
+            # Calculate ICs
+            aics[task_idx] = fitter.aic()
+            bics[task_idx] = fitter.bic()
+        elif model == 'tc':
+            fitter = TCSolver(
+                X=X_train,
+                Y=Y_train,
+                y=y_train,
+                a_mask=a_mask,
+                b_mask=b_mask,
+                solver='ols',
+                c_tuning=0.,
+                c_coupling=0.,
+                fit_intercept=fit_intercept).fit()
+            # Store parameter fits
+            a_est[task_idx] = fitter.a.ravel()
+            b_est[task_idx] = fitter.b.ravel()
+            # Score the resulting fit
+            scores_train[task_idx] = fitter.r2()
+            scores_test[task_idx] = fitter.r2(
+                X=X_test,
+                Y=Y_test,
+                y=y_test)
+            # Calculate ICs
+            aics[task_idx] = fitter.aic()
+            bics[task_idx] = fitter.bic()
 
         if cv_verbose:
             elapsed = time.time() - t0
@@ -415,23 +439,27 @@ def cv_solver_oracle_selection(
         bics = Gatherv_rows(bics, comm)
         a_est = Gatherv_rows(a_est, comm)
         b_est = Gatherv_rows(b_est, comm)
-        B_est = Gatherv_rows(B_est, comm)
-        Psi_est = Gatherv_rows(Psi_est, comm)
-        L_est = Gatherv_rows(L_est, comm)
+        if model == 'tm':
+            B_est = Gatherv_rows(B_est, comm)
+            Psi_est = Gatherv_rows(Psi_est, comm)
+            L_est = Gatherv_rows(L_est, comm)
 
         if rank == 0:
             reshape = [Ks.size, splits.size]
-            B_est.shape = reshape + [M, N]
-            Psi_est.shape = reshape + [-1]
-            L_est.shape = reshape + [Ks.max(), N + 1]
             scores_train.shape = reshape
             scores_test.shape = reshape
             a_est.shape = reshape + [-1]
             b_est.shape = reshape + [-1]
             aics.shape = reshape
             bics.shape = reshape
-
-    return scores_train, scores_test, aics, bics, a_est, b_est, B_est, Psi_est, L_est
+            if model == 'tm':
+                B_est.shape = reshape + [M, N]
+                Psi_est.shape = reshape + [-1]
+                L_est.shape = reshape + [Ks.max(), N + 1]
+    if model == 'tm':
+        return scores_train, scores_test, aics, bics, a_est, b_est, B_est, Psi_est, L_est
+    else:
+        return scores_train, scores_test, aics, bics, a_est, b_est
 
 
 def cv_solver_full(

@@ -97,13 +97,13 @@ class TCSolver():
         if a_mask is None:
             self.a_mask = np.ones(self.N).astype(bool)
         else:
-            self.a_mask = a_mask.ravel()
+            self.a_mask = a_mask.ravel().astype(bool)
 
         # Tuning mask
         if b_mask is None:
             self.b_mask = np.ones(self.M).astype(bool)
         else:
-            self.b_mask = b_mask.ravel()
+            self.b_mask = b_mask.ravel().astype(bool)
 
         self.n_nonzero_coupling = self.a_mask.sum()
         self.n_nonzero_tuning = self.b_mask.sum()
@@ -332,6 +332,40 @@ class TCSolver():
         # Calculate mean squared error
         mse = np.sum((y.ravel() - X @ self.b - Y @ self.a)**2)
         return mse
+
+    def aic(self, X=None, Y=None, y=None):
+        """Calculates the Akaike information criterion on the neural data.
+
+        Parameters
+        ----------
+        X : np.ndarray, shape (D, M)
+            Design matrix for tuning features.
+        Y : np.ndarray, shape (D, N)
+            Design matrix for coupling features.
+        y : np.ndarray, shape (D, 1)
+            Neural response vector.
+
+        Returns
+        -------
+        aic : float
+            The Bayesian information criterion.
+        """
+        # If no data is provided, use the data in the object
+        if X is None:
+            X = self.X
+        if Y is None:
+            Y = self.Y
+        if y is None:
+            y = self.y
+
+        # Calculate mean squared error
+        mse = -self.mse(X=X, Y=Y, y=y)
+        # Add in penalty for model size
+        k = np.count_nonzero(self.a) + np.count_nonzero(self.b)
+        if self.fit_intercept:
+            k += 1
+        aic = 2 * k - 2 * mse
+        return aic
 
     def bic(self, X=None, Y=None, y=None):
         """Calculates the Bayesian information criterion on the neural data.
