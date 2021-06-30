@@ -262,6 +262,8 @@ class TCSolver():
             # Tuning parameters are transformed back
             a, b = self.split_params(params)
             b = b / tuning_to_coupling_ratio
+        else:
+            raise ValueError(f"Solver '{solver}' not available.")
         self.a = a
         self.b = b
         self.set_masks(a_mask=self.a != 0, b_mask=self.b != 0)
