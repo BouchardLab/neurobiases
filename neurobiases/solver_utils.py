@@ -83,7 +83,7 @@ def cv_sparse_solver_single(
     splits = np.arange(n_splits)
 
     # Assign tasks
-    if method == 'em':
+    if method == 'tm':
         hyperparameters = cartesian((coupling_lambdas,
                                      tuning_lambdas,
                                      Ks,
@@ -99,7 +99,7 @@ def cv_sparse_solver_single(
     n_tasks = len(tasks)
 
     # Create storage arrays
-    if method == 'em':
+    if method == 'tm':
         scores_train = np.zeros(n_tasks)
         scores_test = np.zeros(n_tasks)
         aics = np.zeros(n_tasks)
@@ -121,7 +121,7 @@ def cv_sparse_solver_single(
 
     # Iterate over tasks for this rank
     for task_idx, values in enumerate(tasks):
-        if method == 'em':
+        if method == 'tm':
             c_coupling, c_tuning, K_cv, split_idx = values
         elif method == 'itsfa':
             K_cv, split_idx = values
@@ -140,7 +140,7 @@ def cv_sparse_solver_single(
         if cv_verbose:
             t0 = time.time()
 
-        if method == 'em':
+        if method == 'tm':
             fitter = EMSolver(
                 X=X_train,
                 Y=Y_train,
@@ -212,7 +212,7 @@ def cv_sparse_solver_single(
 
     if comm is not None:
         # Gather tasks across all storage arrays
-        if method == 'em':
+        if method == 'tm':
             scores_train = Gatherv_rows(scores_train, comm)
             scores_test = Gatherv_rows(scores_test, comm)
             aics = Gatherv_rows(aics, comm)
@@ -233,7 +233,7 @@ def cv_sparse_solver_single(
             b_est = Gatherv_rows(b_est, comm)
 
         if rank == 0:
-            if method == 'em':
+            if method == 'tm':
                 reshape = [coupling_lambdas.size,
                            tuning_lambdas.size,
                            Ks.size,
@@ -254,7 +254,7 @@ def cv_sparse_solver_single(
             aics.shape = reshape
             bics.shape = reshape
 
-    if method == 'em':
+    if method == 'tm':
         return scores_train, scores_test, aics, bics, a_est, b_est, B_est, Psi_est, L_est
     elif method == 'itsfa':
         return scores_train, scores_test, aics, bics, a_est, b_est, B_est
@@ -593,7 +593,7 @@ def cv_solver_full(
     splits = np.arange(n_splits)
 
     # Set up hyperparameters
-    if method == 'em':
+    if method == 'tm':
         if selection == 'sparse':
             hyperparameters = cartesian(
                 (tuning_sparsities,
@@ -664,7 +664,7 @@ def cv_solver_full(
     n_tasks = len(tasks)
 
     # Create storage arrays
-    if method == 'em':
+    if method == 'tm':
         mlls = np.zeros(n_tasks)
         bics = np.zeros(n_tasks)
         a = np.zeros((n_tasks, N))
@@ -702,7 +702,7 @@ def cv_solver_full(
 
     # Iterate over tasks for this rank
     for task_idx, values in enumerate(tasks):
-        if method == 'em':
+        if method == 'tm':
             if selection == 'sparse':
                 (tuning_sparsity, tuning_loc, coupling_sparsity, coupling_loc,
                  model_idx, corr_cluster, dataset_rng, split_idx, c_coupling,
@@ -767,7 +767,7 @@ def cv_solver_full(
         y_test = y[test_idx]
 
         # Run the sparse fitter
-        if method == 'em':
+        if method == 'tm':
             if selection == 'oracle':
                 fitter = EMSolver(
                     X=X_train,
@@ -889,7 +889,7 @@ def cv_solver_full(
 
     if comm is not None:
         # Gather tasks across all storage arrays
-        if method == 'em':
+        if method == 'tm':
             mlls = Gatherv_rows(mlls, comm)
             bics = Gatherv_rows(bics, comm)
             a = Gatherv_rows(a, comm)
@@ -918,7 +918,7 @@ def cv_solver_full(
 
         if rank == 0:
             # Reshape arrays
-            if method == 'em':
+            if method == 'tm':
                 if selection == 'sparse':
                     reshape = [
                         tuning_sparsities.size,
@@ -971,7 +971,7 @@ def cv_solver_full(
                         splits.size
                     ]
 
-            if method == 'em':
+            if method == 'tm':
                 mlls.shape = reshape
                 B_est.shape = reshape + [M, N]
                 Psi_est.shape = reshape + [-1]
@@ -989,7 +989,7 @@ def cv_solver_full(
                 Psi.shape = reshape + [-1]
                 L.shape = reshape + [Ks.max(), N + 1]
 
-    if method == 'em':
+    if method == 'tm':
         return mlls, bics, a, a_est, b, b_est, B, B_est, Psi, Psi_est, L, L_est
     elif method == 'itsfa':
         return mses, bics, a, a_est, b, b_est, B, B_est, Psi, L
