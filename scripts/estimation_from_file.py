@@ -85,10 +85,17 @@ def main(args):
                 group['bics'] = np.squeeze(bics)
                 group['a_est'] = np.squeeze(a_est)
                 group['b_est'] = np.squeeze(b_est)
+                group.attrs['cv'] = args.cv
+                group.attrs['solver'] = args.solver
+                group.attrs['initialization'] = args.initialization
+                group.attrs['max_iter'] = args.max_iter
+                group.attrs['tol'] = args.tol
+                group.attrs['fitter_rng'] = args.fitter_rng
                 if model == 'tm':
                     group['B_est'] = np.squeeze(B_est)
                     group['Psi_est'] = np.squeeze(Psi_est)
                     group['L_est'] = np.squeeze(L_est)
+                    group.attrs['max_K'] = args.max_K
 
 
 if __name__ == '__main__':
