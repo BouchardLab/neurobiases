@@ -1050,6 +1050,9 @@ class SubsampledModel(TriangularModel):
         default values.
     subsample_frac : float
         Fraction of coupled neurons to randomly keep
+    subsample_rng : {None, int, array_like[ints], SeedSequence, BitGenerator,
+                  Generator}
+        Subsampling random number generator.
     """
     def __init__(
         self, model='linear', parameter_design='direct_response', N=20,
@@ -1103,9 +1106,8 @@ class SubsampledModel(TriangularModel):
         self.l_t *= 0.
 
     def subsample_model(self):
-        """Subsample coupled units."""
+        """Subsample coupled units' parameters."""
         rng = self.subsample_kwargs['rng']
-        subsample_frac = self.subsample_kwargs['subsample_frac']
         N_subsampled = self.subsample_kwargs['N_subsampled']
         all_units = rng.permutation(self.N)
         self.subsampled_units = all_units[:N_subsampled]
@@ -1142,6 +1144,8 @@ class SubsampledModel(TriangularModel):
         rng : {None, int, array_like[ints], SeedSequence, BitGenerator,
                Generator}
             The random number generator or seed for the data samples.
+        subsample : bool
+            If True, returns the subsampled non-target responses.
 
         Returns
         -------
