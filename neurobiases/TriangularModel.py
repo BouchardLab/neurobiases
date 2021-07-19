@@ -1077,7 +1077,8 @@ class SubsampledModel(TriangularModel):
         )
         self.subsample_kwargs = {
             'subsample_frac': subsample_frac,
-            'rng': np.random.default_rng(subsample_rng)
+            'rng': np.random.default_rng(subsample_rng),
+            'N_subsampled': int(N * subsample_frac)
             }
         self.generate_noise_structure()
         self.subsample_model()
@@ -1105,26 +1106,30 @@ class SubsampledModel(TriangularModel):
         """Subsample coupled units."""
         rng = self.subsample_kwargs['rng']
         subsample_frac = self.subsample_kwargs['subsample_frac']
+        N_subsampled = self.subsample_kwargs['N_subsampled']
         all_units = rng.permutation(self.N)
-        N_subsampled = int(self.N * subsample_frac)
         self.subsampled_units = all_units[:N_subsampled]
         self.removed_units = all_units[N_subsampled:]
 
-        self.removed_a = self.a[self.removed_units]
-        self.a = self.a[self.subsampled_units]
+        self.a_remove = self.a[self.removed_units].copy()
+        self.a_full = self.a
+        self.a = self.a[self.subsampled_units].copy()
 
-        self.removed_B = self.B[:, self.removed_units]
-        self.B = self.B[:, self.subsampled_units]
+        self.B_remove = self.B[:, self.removed_units].copy()
+        self.B_full = self.B
+        self.B = self.B[:, self.subsampled_units].copy()
 
-        self.removed_Psi_nt = self.Psi_nt[self.removed_units]
-        Psi_nt = self.Psi_nt[self.subsampled_units]
+        self.Psi_nt_remove = self.Psi_nt[self.removed_units].copy()
+        self.Psi_full = self.Psi
+        self.Psi_nt_full = self.Psi_nt
+        Psi_nt_subsample = self.Psi_nt[self.subsampled_units].copy()
         self.Psi = np.insert(
-            Psi_nt, 0, self.Psi_t
+            Psi_nt_subsample, 0, self.Psi_t
         )
-        self.Psi_t, self.Psi_nt = np.split(self.Psi, [1], axis=0)
+        _, self.Psi_nt = np.split(self.Psi, [1], axis=0)
 
     def generate_samples(
-        self, n_samples, bin_width=0.5, rng=None
+        self, n_samples, bin_width=0.5, rng=None, subsample=True
     ):
         """Generate samples from the triangular model.
 
@@ -1147,6 +1152,7 @@ class SubsampledModel(TriangularModel):
         y : np.ndarray, shape (n_samples, 1)
             The target neural activity responses.
         """
+        N_subsampled = self.subsample_kwargs['N_subsampled']
         rng = np.random.default_rng(rng)
         # Draw values based off parameter design
         if self.parameter_design == 'direct_response':
@@ -1171,28 +1177,30 @@ class SubsampledModel(TriangularModel):
 
         if self.model == 'linear':
             # Non-target private variability
-            psi_nt = np.sqrt(self.Psi_nt) * rng.normal(
+            psi_nt = np.sqrt(self.Psi_nt_full) * rng.normal(
                 loc=0,
                 scale=1.0,
                 size=(n_samples, self.N))
             # Non-target neural activity
-            Y = np.dot(X, self.B) + psi_nt
+            Y = np.dot(X, self.B_full) + psi_nt
             # Target private variability
             psi_t = np.sqrt(self.Psi_t) * rng.normal(
                 loc=0,
                 scale=1.0,
                 size=(n_samples, 1))
             # Target neural activity
-            y = np.dot(X, self.b) + np.dot(Y, self.a) + psi_t
+            y = np.dot(X, self.b) + np.dot(Y, self.a_full) + psi_t
 
         elif self.model == 'poisson':
             # Non-target responses
-            non_target_pre_exp = np.dot(X, self.B)
+            non_target_pre_exp = np.dot(X, self.B_full)
             non_target_mu = np.exp(bin_width * non_target_pre_exp)
             Y = rng.poisson(lam=non_target_mu)
             # Target response
-            target_pre_exp = np.dot(X, self.b) + np.dot(Y, self.a)
+            target_pre_exp = np.dot(X, self.b) + np.dot(Y, self.a_full)
             target_mu = np.exp(bin_width * target_pre_exp)
             y = rng.poisson(lam=target_mu)
 
+        if subsample:
+            Y = Y[:, self.subsampled_units]
         return X, Y, y
