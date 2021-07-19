@@ -974,3 +974,225 @@ class TriangularModel:
             raise ValueError('Chosen distribution not available.')
 
         return variance
+
+
+class SubsampledModel(TriangularModel):
+    """Creates and draws samples from a subsampled triangular model with no shared variability.
+
+    Parameters
+    ----------
+    model : string
+        Specifies either a 'linear' or 'poisson' model.
+    parameter_design : string
+        The structure to impose on the parameters: either 'random',
+        'direct_response' or 'basis_functions'.
+    N : int
+        The number of coupling parameters.
+    coupling_distribution : string
+        The distribution from which to draw the coupling parameters.
+    coupling_sparsity : float
+        The fraction of coupling parameters that are set to zero.
+    coupling_loc : float
+        Specifies the location of the distribution from which the coupling
+        parameters are drawn.
+    coupling_scale : float
+        Specifies the scale of the distribution from which the coupling
+        parameters are drawn.
+    coupling_rng : {None, int, array_like[ints], SeedSequence, BitGenerator,
+                    Generator}
+        The coupling random number generator.
+    M : int
+        The number of tuning parameters.
+    tuning_distribution : string
+        The distribution from which to draw the tuning parameters.
+    tuning_sparsity : float
+        The fraction of tuning parameters that are set to zero.
+    tuning_noise_scale : float
+        Specifies the scale of noise added to the tuning parameters, if
+        desired.
+    tuning_peak : float
+        The maximum possible value of the tuning curve (relevant for Hann
+        window).
+    tuning_loc : float
+        Specifies the location of the distribution from which the tuning
+        parameters are drawn.
+    tuning_scale : float
+        Specifies the scale of the distribution from which the tuning
+        parameters are drawn.
+    tuning_low : float
+        The minimum value of the tuning parameters. Relevant for a uniform
+        tuning distribution.
+    tuning_high : float
+        The maximum value of the tuning parameters. Relevant for a uniform
+        tuning distribution.
+    tuning_bound_frac : float
+        Specifies the fraction of tuning curve that can be truncated off the
+        tuning plane.
+    tuning_diff_decay : float
+        Specifies the coupling probability decays with tuning difference.
+    tuning_bf_scale : float
+        The scale parameter for the tuning basis functions. Relevant for the
+        'basis_functions' parameter design.
+    target_pref_tuning : float
+        The preferred tuning of the target neuron. Relevant for the
+        'basis_functions' parameter design.
+    tuning_add_noise : bool
+        If True, adds noise to the tuning parameters.
+    tuning_overall_scale : float
+        Scaling factor for all tuning parameters.
+    tuning_rng : {None, int, array_like[ints], SeedSequence, BitGenerator,
+                  Generator}
+        The tuning random number generator.
+    stim_distribution : string
+        The distribution from which to draw the stimulus values.
+    stim_kwargs : dict
+        Stimulus keyword arguments. If None, it is automatically populated using
+        default values.
+    subsample_frac : float
+        Fraction of coupled neurons to randomly keep
+    """
+    def __init__(
+        self, model='linear', parameter_design='direct_response', N=20,
+        coupling_distribution='symmetric_lognormal', coupling_sparsity=0.5,
+        coupling_loc=-1, coupling_scale=0.5, coupling_rng=2332, M=20,
+        tuning_distribution='noisy_hann_window', tuning_sparsity=0.50,
+        tuning_noise_scale=None, tuning_peak=150, tuning_loc=0.,
+        tuning_scale=1., tuning_low=0, tuning_high=1., tuning_bound_frac=0.25,
+        tuning_diff_decay=1., tuning_bf_scale=None, target_pref_tuning=0.5,
+        tuning_add_noise=True, tuning_overall_scale=1., tuning_rng=2332,
+        snr=3.,
+        stim_distribution='uniform', stim_kwargs=None, warn=True,
+        subsample_frac=0.9, subsample_rng=2332
+    ):
+        super().__init__(
+            model=model, parameter_design=parameter_design, N=N,
+            coupling_distribution=coupling_distribution, coupling_sparsity=coupling_sparsity,
+            coupling_loc=coupling_loc, coupling_scale=coupling_scale, coupling_rng=coupling_rng, M=M,
+            tuning_distribution=tuning_distribution, tuning_sparsity=tuning_sparsity,
+            tuning_noise_scale=tuning_noise_scale, tuning_peak=tuning_peak, tuning_loc=tuning_loc,
+            tuning_scale=tuning_scale, tuning_low=tuning_low, tuning_high=tuning_high, tuning_bound_frac=tuning_bound_frac,
+            tuning_diff_decay=tuning_diff_decay, tuning_bf_scale=tuning_bf_scale, target_pref_tuning=target_pref_tuning,
+            tuning_add_noise=tuning_add_noise, tuning_overall_scale=tuning_overall_scale, tuning_rng=tuning_rng,
+            stim_distribution=stim_distribution, stim_kwargs=stim_kwargs, warn=warn
+        )
+        self.subsample_kwargs = {
+            'subsample_frac': subsample_frac,
+            'rng': np.random.default_rng(subsample_rng)
+            }
+        self.generate_noise_structure()
+        self.subsample_model()
+
+    def generate_noise_structure(self):
+        """Generates the noise covariance structure for the triangular model."""
+        super().generate_noise_structure()
+        snr = self.noise_kwargs['snr']
+
+        # Noise correlations exist in specific clusters, with increasing
+        # latent dimension increasing the number of clusters
+        non_target_signal_variance = self.non_target_signal_variance()
+        non_target_noise_variance = non_target_signal_variance / snr
+        target_signal_variance = self.target_signal_variance()
+        target_noise_variance = target_signal_variance / snr
+        self.Psi = np.insert(
+            non_target_noise_variance, 0, target_noise_variance
+        )
+        self.Psi_t, self.Psi_nt = np.split(self.Psi, [1], axis=0)
+        self.L *= 0.
+        self.L_nt *= 0.
+        self.l_t *= 0.
+
+    def subsample_model(self):
+        """Subsample coupled units."""
+        rng = self.subsample_kwargs['rng']
+        subsample_frac = self.subsample_kwargs['subsample_frac']
+        all_units = rng.permutation(self.N)
+        N_subsampled = int(self.N * subsample_frac)
+        self.subsampled_units = all_units[:N_subsampled]
+        self.removed_units = all_units[N_subsampled:]
+
+        self.removed_a = self.a[self.removed_units]
+        self.a = self.a[self.subsampled_units]
+
+        self.removed_B = self.B[:, self.removed_units]
+        self.B = self.B[:, self.subsampled_units]
+
+        self.removed_Psi_nt = self.Psi_nt[self.removed_units]
+        Psi_nt = self.Psi_nt[self.subsampled_units]
+        self.Psi = np.insert(
+            Psi_nt, 0, self.Psi_t
+        )
+        self.Psi_t, self.Psi_nt = np.split(self.Psi, [1], axis=0)
+
+    def generate_samples(
+        self, n_samples, bin_width=0.5, rng=None
+    ):
+        """Generate samples from the triangular model.
+
+        Parameters
+        ----------
+        n_samples : int
+            The number of samples.
+        bin_width : float
+            Sets the bin width for the Poisson model.
+        rng : {None, int, array_like[ints], SeedSequence, BitGenerator,
+               Generator}
+            The random number generator or seed for the data samples.
+
+        Returns
+        -------
+        X : np.ndarray, shape (n_samples, M)
+            The tuning features for each stimulus.
+        Y : np.ndarray, shape (n_samples, N)
+            The non-target neural activity matrix.
+        y : np.ndarray, shape (n_samples, 1)
+            The target neural activity responses.
+        """
+        rng = np.random.default_rng(rng)
+        # Draw values based off parameter design
+        if self.parameter_design == 'direct_response':
+            if self.stim_kwargs['distribution'] == 'uniform':
+                X = rng.uniform(
+                    low=self.stim_kwargs['low'],
+                    high=self.stim_kwargs['high'],
+                    size=(n_samples, self.M)
+                )
+            elif self.stim_kwargs['distribution'] == 'gaussian':
+                X = rng.normal(
+                    loc=self.stim_kwargs['loc'],
+                    scale=self.stim_kwargs['scale'],
+                    size=(n_samples, self.M)
+                )
+        # Basis functions first require drawing a stimulus value
+        elif self.parameter_design == 'basis_functions':
+            stimuli = rng.uniform(low=0, high=1, size=n_samples)
+            X = utils.calculate_tuning_features(stimuli, self.bf_centers, self.bf_scale)
+
+        # Draw latent activity
+
+        if self.model == 'linear':
+            # Non-target private variability
+            psi_nt = np.sqrt(self.Psi_nt) * rng.normal(
+                loc=0,
+                scale=1.0,
+                size=(n_samples, self.N))
+            # Non-target neural activity
+            Y = np.dot(X, self.B) + psi_nt
+            # Target private variability
+            psi_t = np.sqrt(self.Psi_t) * rng.normal(
+                loc=0,
+                scale=1.0,
+                size=(n_samples, 1))
+            # Target neural activity
+            y = np.dot(X, self.b) + np.dot(Y, self.a) + psi_t
+
+        elif self.model == 'poisson':
+            # Non-target responses
+            non_target_pre_exp = np.dot(X, self.B)
+            non_target_mu = np.exp(bin_width * non_target_pre_exp)
+            Y = rng.poisson(lam=non_target_mu)
+            # Target response
+            target_pre_exp = np.dot(X, self.b) + np.dot(Y, self.a)
+            target_mu = np.exp(bin_width * target_pre_exp)
+            y = rng.poisson(lam=target_mu)
+
+        return X, Y, y
