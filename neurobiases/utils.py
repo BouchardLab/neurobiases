@@ -1,6 +1,86 @@
 import numpy as np
 
 from scipy.special import erf
+from scipy.stats import spearmanr as sr
+
+
+def X_stimuli(X, stimuli):
+    """Preprocesses input design matrix and stimuli per trials.
+    Parameters
+    ----------
+    X : ndarray (samples, units)
+        Neural data design matrix.
+    stimuli : ndarray (samples,)
+        The stimulus value for each trial.
+    Returns
+    -------
+    n_samples : int
+        The number of samples in the dataset.
+    n_units : int
+        The number of units in the dataset.
+    n_stimuli : int
+        The number of unique stimuli.
+    unique_stimuli : ndarray (stimuli,)
+        The unique stimuli, sorted by value.
+    """
+    n_samples, n_units = X.shape
+    unique_stimuli = np.unique(stimuli)
+    n_stimuli = unique_stimuli.size
+    return n_samples, n_units, n_stimuli, unique_stimuli
+
+
+def all_correlations(X, stimuli, u1=None, u2=None, spearmanr=False):
+    """Compute all pairwise correlations.
+    Parameters
+    ----------
+    X : ndarray (samples, units)
+        Neural data design matrix.
+    stimuli : ndarray (samples,)
+        The stimulus value for each trial.
+    u1, u2 : ndarray (units,)
+        The sub-population to consider correlations between. If None, all
+        correlations are stored.
+    Returns
+    -------
+    corrs: ndarray ((units choose 2) * stimuli)
+        All pairwise correlations across stimuli.
+    """
+    corrs = []
+    n_samples, n_units, n_stimuli, unique_stimuli = X_stimuli(X, stimuli)
+
+    # no sub-populations provided, examine all correlations
+    if u1 is None and u2 is None:
+        idxs = np.triu_indices(n=n_units, k=1)
+    # examine within sub-population correlation specified by u1
+    elif u1 is not None and u2 is None:
+        if u1.dtype == 'bool':
+            u1 = np.argwhere(u1).ravel()
+        idxs = np.array([[idx1, idx2]
+                         for idx1 in u1 for idx2 in u1
+                         if idx2 < idx1])
+        idxs = (idxs[:, 0], idxs[:, 1])
+    # examine between sub-population correlation specified by u1/u2
+    elif u1 is not None and u2 is not None:
+        if u1.dtype == 'bool':
+            u1 = np.argwhere(u1).ravel()
+        if u2.dtype == 'bool':
+            u2 = np.argwhere(u2).ravel()
+        idxs = np.array([[idx1, idx2]
+                         for idx1 in u1 for idx2 in u2])
+        idxs = (idxs[:, 0], idxs[:, 1])
+
+    # get correlations across trials for unique stimuli
+    for stim in unique_stimuli:
+        # get responses corresponding to the current stimulus
+        X_stim = X[np.argwhere(stimuli == stim).ravel()].T
+        if spearmanr:
+            cc = sr(X_stim, axis=1)[0]
+        else:
+            cc = np.corrcoef(X_stim)
+        cc = cc[idxs]
+        corrs.append(cc)
+    corrs = np.concatenate(corrs)
+    return corrs
 
 
 def copy_attribute_dict(attributes):
