@@ -750,3 +750,8 @@ def get_pvc11_tuning_modulation_and_preference(tuning_coefs, form='cosine2'):
         raise ValueError('Form %s is not available.' % form)
 
     return modulations, preferences
+
+
+def rotation(theta):
+    return np.array([[np.cos(theta), np.sin(theta)],
+                     [-np.sin(theta), -np.cos(theta)]])
